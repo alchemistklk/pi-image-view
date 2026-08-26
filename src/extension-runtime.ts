@@ -15,7 +15,7 @@ import { debugLog } from "./debug.ts";
 type TrackedImage = {
 	filePath: string;
 	placeholder: string;
-	/** Full-resolution image attached to the submitted message. */
+	/** Source image used to build the submitted preview. */
 	image: ImageContent;
 	/** Small PNG thumbnail used for both inline preview and model submission. */
 	previewImage?: ImageContent;
@@ -31,9 +31,6 @@ export type ExtensionDeps = {
 	loadImageContentFromPath: (
 		filePath: string,
 	) => Promise<ImageContent | null>;
-	/** Downscale the full-size attachment below the provider's per-image byte
-	 * limit before it is submitted. Absent means submit the image unchanged. */
-	resizeForSubmission?: (image: ImageContent) => Promise<ImageContent>;
 	storeImage?: (image: ImageContent) => Promise<string | undefined>;
 	resolveImageReference?: (reference: string) => string | undefined;
 };
@@ -401,13 +398,10 @@ export function registerImagePreviewExtension(
 			}
 		}
 		const preparedImages = await Promise.all(
-			candidates.map(async ({ entry }, candidateIndex) => {
-				const preview = await ensurePreview(entry);
-				const image = deps.resizeForSubmission
-					? await deps.resizeForSubmission(preview)
-					: preview;
-				return { image, existingIndex: existingIndexes[candidateIndex] };
-			}),
+			candidates.map(async ({ entry }, candidateIndex) => ({
+				image: await ensurePreview(entry),
+				existingIndex: existingIndexes[candidateIndex],
+			})),
 		);
 		const references = await Promise.all(
 			preparedImages.map(async ({ image }) => {

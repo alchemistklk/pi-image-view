@@ -34,139 +34,6 @@ function makeHarness(deps: any) {
 	return { handlers, ctx, getMarkdownTransformer: () => markdownTransformer };
 }
 
-describe("submit attachment resizing", () => {
-	it("attaches the downscaled image when a tracked attachment is oversized", async () => {
-		vi.useFakeTimers();
-		try {
-			const rawImage = {
-				type: "image" as const,
-				data: "RAW",
-				mimeType: "image/png",
-			};
-			const previewImage = {
-				type: "image" as const,
-				data: "PREVIEW",
-				mimeType: "image/png",
-			};
-			const resizedImage = {
-				type: "image" as const,
-				data: "SMALL",
-				mimeType: "image/png",
-			};
-			const resizeForSubmission = vi.fn(async () => resizedImage);
-			const deps = {
-				readImageContentFromPathAsync: vi.fn(async () => rawImage),
-				loadImageContentFromPath: vi.fn(async () => null),
-				maybeResizeImage: vi.fn(async () => previewImage),
-				resizeForSubmission,
-			};
-			const { handlers, ctx } = makeHarness(deps);
-			ctx.ui.getEditorText = vi.fn(() => "check /tmp/big.png");
-
-			await handlers.get("session_start")!(undefined, ctx);
-			await vi.advanceTimersByTimeAsync(300);
-
-			const result = await handlers.get("input")!(
-				{ text: "check /tmp/big.png", images: [] },
-				ctx,
-			);
-
-			expect(result.action).toBe("transform");
-			expect(result.images).toEqual([resizedImage]);
-			expect(resizeForSubmission).toHaveBeenCalledWith(previewImage);
-		} finally {
-			vi.useRealTimers();
-		}
-	});
-
-	it("resizes multiple oversized attachments concurrently and preserves order", async () => {
-		const rawA = {
-			type: "image" as const,
-			data: "RAW_A",
-			mimeType: "image/png",
-		};
-		const rawB = {
-			type: "image" as const,
-			data: "RAW_B",
-			mimeType: "image/png",
-		};
-		const byPath: Record<string, typeof rawA> = {
-			"/tmp/a.png": rawA,
-			"/tmp/b.png": rawB,
-		};
-		const started: string[] = [];
-		let releaseA!: () => void;
-		const aGate = new Promise<void>((resolve) => {
-			releaseA = resolve;
-		});
-		const resizeForSubmission = vi.fn(async (img: any) => {
-			started.push(img.data);
-			if (img.data === "RAW_A") await aGate;
-			return {
-				type: "image" as const,
-				data: `${img.data}_SMALL`,
-				mimeType: img.mimeType,
-			};
-		});
-		const deps = {
-			readImageContentFromPathAsync: vi.fn(
-				async (p: string) => byPath[p] ?? null,
-			),
-			loadImageContentFromPath: vi.fn(async () => null),
-			resizeForSubmission,
-		};
-		const { handlers, ctx } = makeHarness(deps);
-		const text = "see /tmp/a.png and /tmp/b.png";
-		ctx.ui.getEditorText = vi.fn(() => text);
-
-		await handlers.get("session_start")!(undefined, ctx);
-		await new Promise((r) => setTimeout(r, 300));
-
-		const submit = handlers.get("input")!({ text, images: [] }, ctx);
-		// Both resizes must start even while the first is still pending.
-		await vi.waitFor(() => expect(started).toHaveLength(2));
-
-		releaseA();
-		const result = await submit;
-		expect(result.action).toBe("transform");
-		expect(result.images).toEqual([
-			{ type: "image", data: "RAW_A_SMALL", mimeType: "image/png" },
-			{ type: "image", data: "RAW_B_SMALL", mimeType: "image/png" },
-		]);
-	});
-
-	it("attaches the original image when no submission resizer is provided", async () => {
-		vi.useFakeTimers();
-		try {
-			const rawImage = {
-				type: "image" as const,
-				data: "RAW",
-				mimeType: "image/png",
-			};
-			const deps = {
-				readImageContentFromPathAsync: vi.fn(async () => rawImage),
-				loadImageContentFromPath: vi.fn(async () => null),
-			};
-			const { handlers, ctx } = makeHarness(deps);
-			ctx.ui.getEditorText = vi.fn(() => "check /tmp/big.png");
-
-			await handlers.get("session_start")!(undefined, ctx);
-			await vi.advanceTimersByTimeAsync(300);
-
-			const result = await handlers.get("input")!(
-				{ text: "check /tmp/big.png", images: [] },
-				ctx,
-			);
-
-			expect(result.action).toBe("transform");
-			expect(result.images).toEqual([rawImage]);
-		} finally {
-			vi.useRealTimers();
-		}
-	});
-});
-
-
 describe("compact editor attachments", () => {
 	it("replaces a pasted path with a placeholder and submits the same image", async () => {
 		vi.useFakeTimers();
@@ -247,7 +114,6 @@ describe("compact editor attachments", () => {
 			loadImageContentFromPath: vi.fn(async () => null),
 			maybeResizeImage: vi.fn(async () => ({ ...image, data: "THUMB" })),
 			storeImage: vi.fn(async () => ref),
-			resizeForSubmission: vi.fn(async (candidate: typeof image) => candidate),
 		};
 		const { handlers, ctx } = makeHarness(deps);
 
@@ -261,7 +127,6 @@ describe("compact editor attachments", () => {
 			text: `[[Image #1]](${ref}) describe it`,
 			images: [{ ...image, data: "THUMB" }],
 		});
-		expect(deps.resizeForSubmission).toHaveBeenCalledWith({ ...image, data: "THUMB" });
 	});
 
 	it("does not submit an attachment after its placeholder is deleted", async () => {
