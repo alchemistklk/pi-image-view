@@ -20,7 +20,8 @@ The reference remains in conversation history and is clickable. The image itself
 - Deduplicates identical image content
 - Removes internal blob targets from model-facing context
 - Provides session-scoped control over which image attachments reach the model
-- Converts pasted clipboard paths through a rapid 0–240ms scan burst instead of waiting for the normal poll
+- Inserts `[Image #N]` directly from the clipboard on macOS, Windows, and WSL without showing a temporary path
+- Uses a rapid 0–240ms scan burst as the native-Linux and drag/drop fallback
 - Handles immediate submit before the editor polling cycle runs
 - Supports multiple images and removal by deleting a placeholder
 - Resizes screenshot tool-result images through the same thumbnail pipeline
@@ -124,20 +125,22 @@ Both extensions still represent N images as N `ImageContent` blocks until Pi com
 
 For v0.2.0:
 
-- 45 automated tests pass across 9 files.
+- 47 automated tests pass across 10 files.
 - Production dependency audit reports 0 vulnerabilities.
 - `npm pack --dry-run` and `npm publish --dry-run` pass.
 - An isolated Pi load probe succeeds.
 
-## Optional atomic markers
+## Direct paste and atomic markers
 
-By default, `pi-image-view` keeps Pi's active editor untouched so it remains compatible with Vim and other editor extensions. To make `[Image #N]` move and delete as one token, start Pi with:
+On macOS, Windows, and WSL, `pi-image-view` enables its editor by default. It reads image clipboard data itself and inserts `[Image #N]` directly, so Pi never renders a temporary clipboard path. Left/right navigation jumps across the whole marker, and Backspace/Delete removes it in one undoable action. Clipboard text still pastes as text.
+
+Because this replaces Pi's active editor, disable it when using Vim or another editor extension:
 
 ```bash
-PI_IMAGE_VIEW_ATOMIC_MARKERS=1 pi
+PI_IMAGE_VIEW_ATOMIC_MARKERS=0 pi
 ```
 
-Atomic mode replaces the active editor for that session. Left/right navigation jumps across the whole marker, and Backspace/Delete removes it in one undoable action. Do not enable it together with another extension that replaces Pi's editor.
+Native Linux keeps Pi's default editor and uses paste-triggered burst scans by default. It can opt in with `PI_IMAGE_VIEW_ATOMIC_MARKERS=1`, but direct clipboard image reading is currently limited to macOS, Windows, and WSL. Programmatic integrations can also use `createImageView({ atomicMarkers: true | false })`.
 
 ## Terminal support
 

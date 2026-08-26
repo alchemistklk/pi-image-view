@@ -1,6 +1,8 @@
 import { CustomEditor, type KeybindingsManager } from "@earendil-works/pi-coding-agent";
 import type { EditorTheme, TUI } from "@earendil-works/pi-tui";
 import { markerSpanAt, segmentAtomicImageMarkers } from "./marker-spans.ts";
+import type { ClipboardPayload } from "./clipboard.ts";
+import type { ImageContent } from "./content.ts";
 
 interface EditorInternals {
 	state: { lines: string[]; cursorLine: number; cursorCol: number };
@@ -15,11 +17,28 @@ const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme
 const wordSegmenter = new Intl.Segmenter(undefined, { granularity: "word" });
 
 export class ImageViewAtomicEditor extends CustomEditor {
-	constructor(tui: TUI, theme: EditorTheme, private readonly imageViewKeys: KeybindingsManager) {
+	constructor(
+		tui: TUI,
+		theme: EditorTheme,
+		private readonly imageViewKeys: KeybindingsManager,
+		private readonly clipboardOptions: { readClipboard: () => ClipboardPayload; attachImage: (image: ImageContent) => string },
+	) {
 		super(tui, theme, imageViewKeys);
 		const internals = this as unknown as EditorInternals;
 		internals.segment = (text, mode = "grapheme") =>
 			segmentAtomicImageMarkers(text, mode === "word" ? wordSegmenter : graphemeSegmenter);
+		this.onPasteImage = () => this.handleClipboardPaste();
+	}
+
+	private handleClipboardPaste(): void {
+		const payload = this.clipboardOptions.readClipboard();
+		if (payload.kind === "image") {
+			this.insertTextAtCursor(this.clipboardOptions.attachImage(payload.image));
+			this.tui.requestRender();
+		} else if (payload.kind === "text") {
+			this.insertTextAtCursor(payload.text);
+			this.tui.requestRender();
+		}
 	}
 
 	override handleInput(data: string): void {
@@ -62,6 +81,11 @@ export class ImageViewAtomicEditor extends CustomEditor {
 	}
 }
 
-export function createAtomicMarkerEditor(tui: TUI, theme: EditorTheme, keys: KeybindingsManager) {
-	return new ImageViewAtomicEditor(tui, theme, keys);
+export function createAtomicMarkerEditor(
+	tui: TUI,
+	theme: EditorTheme,
+	keys: KeybindingsManager,
+	options: { readClipboard: () => ClipboardPayload; attachImage: (image: ImageContent) => string },
+) {
+	return new ImageViewAtomicEditor(tui, theme, keys, options);
 }

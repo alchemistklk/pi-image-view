@@ -343,8 +343,14 @@ describe("draft scan lifecycle", () => {
 			createAtomicEditor,
 		});
 
+		const editor = { kind: "atomic" };
+		createAtomicEditor.mockReturnValue(editor);
 		await handlers.get("session_start")!(undefined, ctx);
-		expect(ctx.ui.setEditorComponent).toHaveBeenCalledWith(createAtomicEditor);
+		const factory = ctx.ui.setEditorComponent.mock.calls[0]?.[0];
+		expect(factory("tui", "theme", "keys")).toBe(editor);
+		expect(createAtomicEditor).toHaveBeenCalledWith("tui", "theme", "keys", expect.any(Function));
+		const attachImage = createAtomicEditor.mock.calls[0]?.[3];
+		expect(attachImage({ type: "image", data: "CLIP", mimeType: "image/png" })).toBe("[Image #1]");
 		await handlers.get("session_shutdown")!(undefined, ctx);
 		expect(ctx.ui.setEditorComponent).toHaveBeenLastCalledWith(undefined);
 	});

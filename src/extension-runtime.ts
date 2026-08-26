@@ -30,7 +30,7 @@ export type ExtensionDeps = {
 	maybeResizeImage?: (image: ImageContent) => Promise<ImageContent>;
 	resizeDetailImage?: (image: ImageContent) => Promise<ImageContent>;
 	normalizeImageForMatching?: (image: ImageContent) => Promise<ImageContent>;
-	createAtomicEditor?: (tui: unknown, theme: unknown, keybindings: unknown) => unknown;
+	createAtomicEditor?: (tui: unknown, theme: unknown, keybindings: unknown, attachImage: (image: ImageContent) => string) => unknown;
 	isImagePasteInput?: (data: string) => boolean;
 	loadImageContentFromPath: (
 		filePath: string,
@@ -177,6 +177,21 @@ export function registerImagePreviewExtension(
 
 	// ── Helpers ────────────────────────────────────────────
 
+
+	function attachClipboardImage(image: ImageContent): string {
+		const placeholder = `[Image #${nextPlaceholderNumber++}]`;
+		const extension = image.mimeType === "image/jpeg" ? "jpg" : image.mimeType.split("/")[1] || "png";
+		const entry: TrackedImage = {
+			filePath: `clipboard.${extension}`,
+			placeholder,
+			image,
+			label: `clipboard.${extension}`,
+		};
+		tracked.set(placeholder, entry);
+		if (deps.maybeResizeImage) void ensurePreview(entry);
+		else if (latestCtx) refreshWidget(latestCtx);
+		return placeholder;
+	}
 
 	function ensurePreview(entry: TrackedImage): Promise<ImageContent> {
 		if (entry.previewImage) return Promise.resolve(entry.previewImage);
@@ -404,7 +419,9 @@ export function registerImagePreviewExtension(
 		latestCtx = ctx;
 		resetDraft(ctx);
 		if (deps.createAtomicEditor && ctx.ui.setEditorComponent) {
-			ctx.ui.setEditorComponent(deps.createAtomicEditor);
+			ctx.ui.setEditorComponent((tui, theme, keybindings) =>
+				deps.createAtomicEditor!(tui, theme, keybindings, attachClipboardImage),
+			);
 		}
 		if (ctx.hasUI !== false && ctx.mode !== "print" && ctx.mode !== "json") {
 			startPolling();
