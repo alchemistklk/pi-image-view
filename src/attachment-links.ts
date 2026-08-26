@@ -29,7 +29,6 @@ export function stripImageMarkerLinks(text: string): string {
 }
 
 function renderReference(
-	match: string,
 	index: string,
 	reference: string,
 	resolvePath: (reference: string) => string | undefined,
@@ -48,11 +47,11 @@ export function renderImageMarkerLinks(
 	resolvePath: (reference: string) => string | undefined,
 ): string {
 	return markdown
-		.replace(BRACKETED_REFERENCE_RE, (match, index: string, reference: string) =>
-			renderReference(match, index, reference, resolvePath),
+		.replace(BRACKETED_REFERENCE_RE, (_match, index: string, reference: string) =>
+			renderReference(index, reference, resolvePath),
 		)
-		.replace(LEGACY_REFERENCE_RE, (match, index: string, reference: string) =>
-			renderReference(match, index, reference, resolvePath),
+		.replace(LEGACY_REFERENCE_RE, (_match, index: string, reference: string) =>
+			renderReference(index, reference, resolvePath),
 		);
 }
 

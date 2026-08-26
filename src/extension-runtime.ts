@@ -422,10 +422,17 @@ export function registerImagePreviewExtension(
 			const key = `${entry.image.mimeType}\u0000${entry.image.data}`;
 			return existingByContent.get(key)?.shift();
 		});
-		if (deps.normalizeImageForMatching) {
-			for (let candidateIndex = 0; candidateIndex < candidates.length; candidateIndex += 1) {
-				if (existingIndexes[candidateIndex] !== undefined) continue;
-				const normalized = await deps.normalizeImageForMatching(candidates[candidateIndex]!.entry.image);
+		if (deps.normalizeImageForMatching && (event.images?.length ?? 0) > 0) {
+			const normalizedCandidates = await Promise.all(
+				candidates.map(({ entry }, candidateIndex) =>
+					existingIndexes[candidateIndex] === undefined
+						? deps.normalizeImageForMatching!(entry.image)
+						: Promise.resolve(undefined),
+				),
+			);
+			for (let candidateIndex = 0; candidateIndex < normalizedCandidates.length; candidateIndex += 1) {
+				const normalized = normalizedCandidates[candidateIndex];
+				if (!normalized) continue;
 				const key = `${normalized.mimeType}\u0000${normalized.data}`;
 				existingIndexes[candidateIndex] = existingByContent.get(key)?.shift();
 			}

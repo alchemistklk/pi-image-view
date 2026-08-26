@@ -175,6 +175,49 @@ describe("compact editor attachments", () => {
 		}
 	});
 
+
+	it("replaces only the normalized matching event image in a mixed list", async () => {
+		const unrelated = { type: "image" as const, data: "UNRELATED", mimeType: "image/png" };
+		const coreResized = { type: "image" as const, data: "CORE_RESIZED", mimeType: "image/png" };
+		const original = { type: "image" as const, data: "ORIGINAL", mimeType: "image/png" };
+		const thumbnail = { ...original, data: "THUMB" };
+		const deps = {
+			readImageContentFromPathAsync: vi.fn(async () => original),
+			loadImageContentFromPath: vi.fn(async () => null),
+			maybeResizeImage: vi.fn(async () => thumbnail),
+			normalizeImageForMatching: vi.fn(async () => coreResized),
+		};
+		const { handlers, ctx } = makeHarness(deps);
+
+		const result = await handlers.get("input")!(
+			{ text: "/tmp/original.png compare", images: [unrelated, coreResized] },
+			ctx,
+		);
+
+		expect(result.images).toEqual([unrelated, thumbnail]);
+	});
+
+	it("skips matching normalization when no event images exist", async () => {
+		const original = { type: "image" as const, data: "ORIGINAL", mimeType: "image/png" };
+		const thumbnail = { ...original, data: "THUMB" };
+		const normalize = vi.fn(async () => original);
+		const deps = {
+			readImageContentFromPathAsync: vi.fn(async () => original),
+			loadImageContentFromPath: vi.fn(async () => null),
+			maybeResizeImage: vi.fn(async () => thumbnail),
+			normalizeImageForMatching: normalize,
+		};
+		const { handlers, ctx } = makeHarness(deps);
+
+		const result = await handlers.get("input")!(
+			{ text: "/tmp/original.png inspect", images: [] },
+			ctx,
+		);
+
+		expect(result.images).toEqual([thumbnail]);
+		expect(normalize).not.toHaveBeenCalled();
+	});
+
 	it("does not submit an attachment after its placeholder is deleted", async () => {
 		vi.useFakeTimers();
 		try {
