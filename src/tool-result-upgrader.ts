@@ -46,7 +46,7 @@ export async function upgradeScreenshotToolResult(
 
 	const hint: TextContent = {
 		type: "text",
-		text: "[image-preview: screenshot was saved via filePath but the image file was not readable. If you need to inspect the screenshot agentically, retry the screenshot tool without filePath so the image is returned inline.]",
+		text: "[pi-image-view: screenshot was saved via filePath but the image file was not readable. If you need to inspect the screenshot agentically, retry the screenshot tool without filePath so the image is returned inline.]",
 	};
 	return { content: [...event.content, hint] };
 }

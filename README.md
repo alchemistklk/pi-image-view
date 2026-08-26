@@ -67,6 +67,10 @@ When a long session has accumulated many images, clear the images that already e
 
 The extension always strips local file and internal image-link targets before model calls. Image-only historical messages receive a short text placeholder when their attachment is omitted.
 
+## Session portability and privacy
+
+Clickable history references store an absolute local `file://` Blob path in the Pi session JSONL. The extension strips that target from model-facing context, so providers receive only `[Image #N]` plus the image attachment. However, exporting or sharing the raw session can reveal the local username/path, and the link will not work on another machine. Review session data before sharing it.
+
 ## Blob lifecycle
 
 Identical images share one content-addressed blob. Automatic deletion is currently disabled: a Pi process can use a custom or temporary session directory, so scanning only that directory is not sufficient evidence that a globally stored blob is unreferenced. Until cleanup can coordinate across every configured session root and active process, preserving referenced history links takes priority over reclaiming disk space.
