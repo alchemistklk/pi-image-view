@@ -228,6 +228,35 @@ describe("compact editor attachments", () => {
 		});
 	});
 
+
+	it("does not append a path image already present in event.images", async () => {
+		const image = {
+			type: "image" as const,
+			data: "SAME_IMAGE",
+			mimeType: "image/png",
+		};
+		const ref = `file:///tmp/image-view/blobs/${"a".repeat(64)}.png`;
+		const deps = {
+			readImageContentFromPathAsync: vi.fn(async () => image),
+			loadImageContentFromPath: vi.fn(async () => null),
+			storeImage: vi.fn(async () => ref),
+			resizeForSubmission: vi.fn(async (candidate: typeof image) => candidate),
+		};
+		const { handlers, ctx } = makeHarness(deps);
+
+		const result = await handlers.get("input")!(
+			{ text: "/tmp/already-attached.png describe it", images: [image] },
+			ctx,
+		);
+
+		expect(result).toEqual({
+			action: "transform",
+			text: `[[Image #1]](${ref}) describe it`,
+			images: [image],
+		});
+		expect(deps.resizeForSubmission).not.toHaveBeenCalled();
+	});
+
 	it("does not submit an attachment after its placeholder is deleted", async () => {
 		vi.useFakeTimers();
 		try {

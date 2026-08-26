@@ -339,15 +339,26 @@ export function registerImagePreviewExtension(
 		if (candidates.length === 0) return { action: "continue" };
 		candidates.sort((a, b) => a.index - b.index);
 
-		const usedImages: ImageContent[] = await Promise.all(
-			candidates.map(({ entry }) =>
-				deps.resizeForSubmission
-					? deps.resizeForSubmission(entry.image)
-					: Promise.resolve(entry.image),
-			),
+		const existingByContent = new Map<string, ImageContent[]>();
+		for (const image of event.images ?? []) {
+			const key = `${image.mimeType}\u0000${image.data}`;
+			const matches = existingByContent.get(key);
+			if (matches) matches.push(image);
+			else existingByContent.set(key, [image]);
+		}
+		const preparedImages = await Promise.all(
+			candidates.map(async ({ entry }) => {
+				const key = `${entry.image.mimeType}\u0000${entry.image.data}`;
+				const existing = existingByContent.get(key)?.shift();
+				if (existing) return { image: existing, append: false };
+				const image = deps.resizeForSubmission
+					? await deps.resizeForSubmission(entry.image)
+					: entry.image;
+				return { image, append: true };
+			}),
 		);
 		const references = await Promise.all(
-			usedImages.map(async (image) => {
+			preparedImages.map(async ({ image }) => {
 				if (!deps.storeImage) return undefined;
 				try {
 					return await deps.storeImage(image);
@@ -366,7 +377,10 @@ export function registerImagePreviewExtension(
 				: candidate.entry.placeholder;
 			transformedText = transformedText.replace(candidate.token, marker);
 		}
-		const images = [...(event.images ?? []), ...usedImages];
+		const images = [
+			...(event.images ?? []),
+			...preparedImages.filter(({ append }) => append).map(({ image }) => image),
+		];
 		resetDraft(ctx);
 		return { action: "transform", text: transformedText, images };
 	});
