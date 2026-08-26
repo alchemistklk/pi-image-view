@@ -75,6 +75,47 @@ Clickable history references store an absolute local `file://` Blob path in the 
 
 Identical images share one content-addressed blob. Automatic deletion is currently disabled: a Pi process can use a custom or temporary session directory, so scanning only that directory is not sufficient evidence that a globally stored blob is unreferenced. Until cleanup can coordinate across every configured session root and active process, preserving referenced history links takes priority over reclaiming disk space.
 
+## Performance snapshot
+
+A local benchmark used the production 480px PNG payloads from five UI screenshots (118–157 KB each), isolated Pi sessions, `medium` thinking, and the prompt `Reply with exactly OK`. Each cell ran once cold and once warm; the table below shows the warm/cache-influenced round.
+
+| Model | 0 images | 10 images | 20 images | 40 images |
+| --- | ---: | ---: | ---: | ---: |
+| GPT-5.6 Luna | 5.61s | 6.98s | 7.51s | 9.44s |
+| GPT-5.6 Sol | 6.11s | 7.06s | 11.81s | 9.35s |
+| GPT-5.6 Terra | 10.48s | 8.32s | 9.18s | 11.64s |
+
+All 12 measured requests completed successfully and the persisted image count matched the target count. Warm requests used approximately 1,664 / 4,096 / 7,680 cache-read tokens at 10 / 20 / 40 images. These are single-run measurements, not p50/p90 latency claims; provider variance is visible in the non-monotonic Sol and Terra rows.
+
+A representative source image changed from 2114×1040 and 867,917 bytes to 480×236 and 125,889 bytes—about an 85% reduction. Use `/pi-image-view clear` when an unusually image-heavy session still becomes slow.
+
+## Compared with `pi-image-preview`
+
+`pi-image-view` is forked from `pi-image-preview` and keeps its core Kitty/tmux preview behavior. The main differences are:
+
+| Capability | `pi-image-preview` 0.1.5 | `pi-image-view` 0.1.0 |
+| --- | --- | --- |
+| Draft thumbnail | Yes | Yes |
+| Typical model payload | 480px preview | 480px preview |
+| Editor text | Local image path | `[Image #N]` |
+| Sent-history reference | No stable clickable reference | Clickable `[Image #N]` |
+| Persistent local image | No dedicated history Blob | SHA-256 content-addressed Blob |
+| Model-visible local path | Path can remain in message text | Link target is stripped before provider calls |
+| Duplicate attachment protection | No normalized reconciliation | Exact and Pi-normalized matching |
+| Long-session escape hatch | Rely on Pi compaction/new session | Non-destructive `/pi-image-view clear` |
+| Automatic Blob deletion | Not applicable | Disabled for safety |
+
+Both extensions still represent N images as N `ImageContent` blocks until Pi compacts the session or the user clears context. `pi-image-view` focuses on persistent, inspectable history without adding an automatic image-count cap.
+
+## Release validation
+
+For v0.1.0:
+
+- 32 automated tests pass across 7 files.
+- Production dependency audit reports 0 vulnerabilities.
+- `npm pack --dry-run` and `npm publish --dry-run` pass.
+- An isolated Pi load probe succeeds.
+
 ## Terminal support
 
 Pure-text references work in every Pi-supported terminal. Clickable links require terminal OSC 8 support; on macOS, use the terminal's normal link modifier such as `Command`-click.
