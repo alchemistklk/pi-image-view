@@ -28,6 +28,7 @@ function makeHarness(deps: any) {
 		cwd: "/tmp",
 		hasUI: true,
 		isIdle: () => true,
+		sessionManager: { getBranch: vi.fn<() => any[]>(() => []) },
 		ui: {
 			getEditorComponent: vi.fn(() => activeEditorFactory),
 			onTerminalInput: vi.fn((handler: (data: string) => unknown) => { terminalInputHandler = handler; return vi.fn(); }),
@@ -337,6 +338,44 @@ describe("draft scan lifecycle", () => {
 	});
 
 
+	it("keeps image numbers monotonic across submitted drafts", async () => {
+		const image = { type: "image" as const, data: "CLIP", mimeType: "image/png" };
+		const createAtomicEditor = vi.fn((_tui: unknown, _theme: unknown, _keys: unknown, _attach: (image: any) => string) => ({}));
+		const { handlers, ctx } = makeHarness({
+			readImageContentFromPathAsync: vi.fn(async () => null),
+			loadImageContentFromPath: vi.fn(async () => null),
+			createAtomicEditor,
+		});
+		await handlers.get("session_start")!(undefined, ctx);
+		const factory = ctx.ui.setEditorComponent.mock.calls[0]![0] as (...args: any[]) => unknown;
+		factory("tui", "theme", "keys");
+		const attach = createAtomicEditor.mock.calls[0]![3] as (value: { type: "image"; data: string; mimeType: string }) => string;
+
+		expect(attach(image)).toBe("[Image #1]");
+		await handlers.get("input")!({ text: "[Image #1]", images: [] }, ctx);
+		expect(attach(image)).toBe("[Image #2]");
+	});
+
+	it("continues numbering from user markers on the active branch", async () => {
+		const createAtomicEditor = vi.fn((_tui: unknown, _theme: unknown, _keys: unknown, _attach: (image: any) => string) => ({}));
+		const { handlers, ctx } = makeHarness({
+			readImageContentFromPathAsync: vi.fn(async () => null),
+			loadImageContentFromPath: vi.fn(async () => null),
+			createAtomicEditor,
+		});
+		ctx.sessionManager.getBranch.mockReturnValue([
+			{ type: "message", message: { role: "user", content: "[[Image #7]](file:///blob.png)" } },
+			{ type: "message", message: { role: "user", content: [{ type: "text", text: "[Image #12]" }] } },
+			{ type: "message", message: { role: "assistant", content: "[Image #99]" } },
+		]);
+		await handlers.get("session_start")!(undefined, ctx);
+		const factory = ctx.ui.setEditorComponent.mock.calls[0]![0] as (...args: any[]) => unknown;
+		factory("tui", "theme", "keys");
+		const attach = createAtomicEditor.mock.calls[0]![3] as (image: { type: "image"; data: string; mimeType: string }) => string;
+
+		expect(attach({ type: "image", data: "CLIP", mimeType: "image/png" })).toBe("[Image #13]");
+	});
+
 	it("installs and removes the optional atomic editor with the session lifecycle", async () => {
 		const createAtomicEditor = vi.fn();
 		const { handlers, ctx } = makeHarness({
@@ -349,7 +388,7 @@ describe("draft scan lifecycle", () => {
 		createAtomicEditor.mockReturnValue(editor);
 		await handlers.get("session_start")!(undefined, ctx);
 		const factory = ctx.ui.setEditorComponent.mock.calls[0]?.[0];
-		expect(factory("tui", "theme", "keys")).toBe(editor);
+		expect(factory?.("tui", "theme", "keys")).toBe(editor);
 		expect(createAtomicEditor).toHaveBeenCalledWith("tui", "theme", "keys", expect.any(Function));
 		const attachImage = createAtomicEditor.mock.calls[0]?.[3];
 		expect(attachImage({ type: "image", data: "CLIP", mimeType: "image/png" })).toBe("[Image #1]");
