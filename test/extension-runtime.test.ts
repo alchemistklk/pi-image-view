@@ -400,7 +400,24 @@ describe("draft scan lifecycle", () => {
 		await handlers.get("session_shutdown")!(undefined, ctx);
 
 		expect(ctx.ui.getEditorComponent()).toBe(otherFactory);
-		expect(ctx.ui.setEditorComponent).not.toHaveBeenLastCalledWith(undefined);
+	});
+
+	it("restores the factory it displaced when it still owns the editor", async () => {
+		const createAtomicEditor = vi.fn(() => ({ kind: "atomic" }));
+		const { handlers, ctx } = makeHarness({
+			readImageContentFromPathAsync: vi.fn(async () => null),
+			loadImageContentFromPath: vi.fn(async () => null),
+			createAtomicEditor,
+		});
+		const priorFactory = vi.fn();
+		ctx.ui.setEditorComponent(priorFactory);
+
+		await handlers.get("session_start")!(undefined, ctx);
+		expect(ctx.ui.getEditorComponent()).not.toBe(priorFactory);
+
+		await handlers.get("session_shutdown")!(undefined, ctx);
+
+		expect(ctx.ui.getEditorComponent()).toBe(priorFactory);
 	});
 
 	it("polls only with UI and cleans up on session shutdown", async () => {

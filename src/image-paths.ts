@@ -49,10 +49,13 @@ export function normalizeDetectedImagePath(
 		return value;
 	}
 	if (/^\\\\/.test(value)) return value;
-	if (value === "~" || value.startsWith("~/")) {
-		return resolve(options.home ?? homedir(), value === "~" ? "" : value.slice(2));
-	}
+	// Shell escapes must be resolved before the ~ and ./ prefixes are interpreted:
+	// dragging a file into the terminal yields "~/My\ Photo.png", and resolving that
+	// against the home directory without unescaping keeps the literal backslash.
 	const unescaped = value.replace(/\\(.)/g, "$1");
+	if (unescaped === "~" || unescaped.startsWith("~/")) {
+		return resolve(options.home ?? homedir(), unescaped === "~" ? "" : unescaped.slice(2));
+	}
 	if (unescaped.startsWith("./") || unescaped.startsWith("../")) {
 		return resolve(options.cwd ?? process.cwd(), unescaped);
 	}

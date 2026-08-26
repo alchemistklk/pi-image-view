@@ -24,4 +24,17 @@ describe("image gallery format safety", () => {
 			write.mockRestore();
 		}
 	});
+
+	it("still transmits through Kitty when every image is PNG", () => {
+		const write = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+		try {
+			const gallery = new ImageGallery({ accent: plain, muted: plain, dim: plain, bold: plain });
+			gallery.setImages([{ data: "png", mimeType: "image/png", label: "shot.png" }]);
+			const lines = gallery.render(80);
+			expect(lines).not.toContain("  shot.png");
+			expect(write).toHaveBeenCalled();
+		} finally {
+			write.mockRestore();
+		}
+	});
 });

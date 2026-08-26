@@ -125,7 +125,7 @@ Both extensions still represent N images as N `ImageContent` blocks until Pi com
 
 For v0.2.0:
 
-- 51 automated tests pass across 12 files.
+- 59 automated tests pass across 12 files.
 - Production dependency audit reports 0 vulnerabilities.
 - `npm pack --dry-run` and `npm publish --dry-run` pass.
 - An isolated Pi load probe succeeds.

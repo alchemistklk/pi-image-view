@@ -1,5 +1,6 @@
 import { CustomEditor, type KeybindingsManager } from "@earendil-works/pi-coding-agent";
 import type { EditorTheme, TUI } from "@earendil-works/pi-tui";
+import { debugLog } from "./debug.ts";
 import { markerSpanAt, segmentAtomicImageMarkers } from "./marker-spans.ts";
 import type { ClipboardPayload } from "./clipboard.ts";
 import type { ImageContent } from "./content.ts";
@@ -17,6 +18,13 @@ const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme
 const wordSegmenter = new Intl.Segmenter(undefined, { granularity: "word" });
 
 export class ImageViewAtomicEditor extends CustomEditor {
+	/** Bumped on every submit so in-flight clipboard reads can detect a sent draft. */
+	private draftGeneration = 0;
+	/** Host-assigned submit handler, hidden behind the `onSubmit` accessor. */
+	private submitHandler?: (text: string) => void;
+	/** Serializes overlapping clipboard reads. */
+	private pasteQueue: Promise<void> = Promise.resolve();
+
 	constructor(
 		tui: TUI,
 		theme: EditorTheme,
@@ -27,18 +35,53 @@ export class ImageViewAtomicEditor extends CustomEditor {
 		const internals = this as unknown as EditorInternals;
 		internals.segment = (text, mode = "grapheme") =>
 			segmentAtomicImageMarkers(text, mode === "word" ? wordSegmenter : graphemeSegmenter);
-		this.onPasteImage = () => { void this.handleClipboardPaste(); };
+		this.interceptSubmit();
+		this.onPasteImage = () => this.enqueueClipboardPaste();
 	}
 
-	private async handleClipboardPaste(): Promise<void> {
+	/**
+	 * Observe submissions so a clipboard read that is still in flight can tell
+	 * whether the draft it was started for has already been sent. `onSubmit` is
+	 * assigned by the host after construction, so the interceptor is installed as
+	 * an accessor over the inherited field rather than by overriding a method.
+	 */
+	private interceptSubmit(): void {
+		this.submitHandler = this.onSubmit;
+		const notifySubmit = (text: string): void => {
+			this.draftGeneration++;
+			this.submitHandler?.(text);
+		};
+		Object.defineProperty(this, "onSubmit", {
+			configurable: true,
+			enumerable: true,
+			get: () => (this.submitHandler ? notifySubmit : undefined),
+			set: (handler: ((text: string) => void) | undefined) => {
+				this.submitHandler = handler;
+			},
+		});
+	}
+
+	/**
+	 * Clipboard reads spawn a subprocess, so they finish well after the keystroke.
+	 * Pastes are serialized to keep insertion order deterministic, and the result
+	 * is dropped if the draft it belongs to was submitted while the read was in
+	 * flight — otherwise the image would be attached to the following turn.
+	 */
+	private enqueueClipboardPaste(): void {
+		const generation = this.draftGeneration;
+		this.pasteQueue = this.pasteQueue
+			.then(() => this.handleClipboardPaste(generation))
+			.catch((error) => debugLog("Clipboard paste failed", error));
+	}
+
+	private async handleClipboardPaste(generation: number): Promise<void> {
 		const payload = await this.clipboardOptions.readClipboard();
-		if (payload.kind === "image") {
-			this.insertTextAtCursor(this.clipboardOptions.attachImage(payload.image));
-			this.tui.requestRender();
-		} else if (payload.kind === "text") {
-			this.insertTextAtCursor(payload.text);
-			this.tui.requestRender();
-		}
+		if (payload.kind === "empty" || generation !== this.draftGeneration) return;
+		const text = payload.kind === "image"
+			? this.clipboardOptions.attachImage(payload.image)
+			: payload.text;
+		this.insertTextAtCursor(text);
+		this.tui.requestRender();
 	}
 
 	override handleInput(data: string): void {

@@ -86,4 +86,14 @@ it("expands home-relative and resolves cwd-relative paths", () => {
 	]);
 });
 
+it("resolves shell escapes before expanding home- and cwd-relative prefixes", () => {
+	expect(extractImagePaths("~/My\\ Photo.png ./sub\\ dir/b.jpg", {
+		home: "/Users/test",
+		cwd: "/work/project",
+	})).toEqual([
+		{ raw: "~/My\\ Photo.png", path: "/Users/test/My Photo.png" },
+		{ raw: "./sub\\ dir/b.jpg", path: "/work/project/sub dir/b.jpg" },
+	]);
+});
+
 });
