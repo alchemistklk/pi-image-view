@@ -1,12 +1,19 @@
 import { pathToFileURL } from "node:url";
 
-const IMAGE_REFERENCE_SOURCE =
-	String.raw`\[Image #(\d+)\]\((image-view:\/\/sha256\/([a-f0-9]{64}\.(?:png|jpg|gif|webp)))\)`;
-const IMAGE_REFERENCE_RE = new RegExp(IMAGE_REFERENCE_SOURCE, "g");
+const BLOB_NAME = String.raw`[a-f0-9]{64}\.(?:png|jpg|gif|webp)`;
+const INTERNAL_REFERENCE = String.raw`image-view:\/\/sha256\/${BLOB_NAME}`;
+const FILE_REFERENCE = String.raw`file:\/\/\/[^)\n]*\/image-view\/blobs\/${BLOB_NAME}`;
+const IMAGE_REFERENCE_RE = new RegExp(
+	String.raw`\[Image #(\d+)\]\((${INTERNAL_REFERENCE}|${FILE_REFERENCE})\)`,
+	"g",
+);
+
+function isSupportedReference(reference: string): boolean {
+	return new RegExp(String.raw`^(?:${INTERNAL_REFERENCE}|${FILE_REFERENCE})$`).test(reference);
+}
 
 export function createImageMarkerLink(label: string, reference: string): string {
-	if (!/^\[Image #\d+\]$/.test(label)) return label;
-	if (!/^image-view:\/\/sha256\/[a-f0-9]{64}\.(?:png|jpg|gif|webp)$/.test(reference)) return label;
+	if (!/^\[Image #\d+\]$/.test(label) || !isSupportedReference(reference)) return label;
 	return `${label}(${reference})`;
 }
 
@@ -20,7 +27,8 @@ export function renderImageMarkerLinks(
 ): string {
 	return markdown.replace(
 		IMAGE_REFERENCE_RE,
-		(_match, index: string, reference: string) => {
+		(match, index: string, reference: string) => {
+			if (reference.startsWith("file://")) return match;
 			const filePath = resolvePath(reference);
 			return filePath
 				? `[Image #${index}](${pathToFileURL(filePath).href})`

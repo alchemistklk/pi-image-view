@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, readFile, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
 	collectReferencedBlobNames,
@@ -32,7 +33,10 @@ describe("image blob store", () => {
 		const old = new Date(Date.now() - 10 * 60_000);
 		await utimes(orphan, old, old);
 		await mkdir(sessions, { recursive: true });
-		await writeFile(join(sessions, "session.jsonl"), JSON.stringify({ text: kept.reference }));
+		await writeFile(
+			join(sessions, "session.jsonl"),
+			JSON.stringify({ text: pathToFileURL(kept.displayPath).href }),
+		);
 
 		const references = await collectReferencedBlobNames([sessions]);
 		const result = await gcUnreferencedBlobs(blobs, references, { graceMs: 5 * 60_000 });

@@ -5,7 +5,7 @@ import { basename, dirname, join } from "node:path";
 import type { ImageContent } from "./content.ts";
 
 const BLOB_NAME_RE = /^[a-f0-9]{64}\.(?:png|jpg|gif|webp)$/;
-const REFERENCE_RE = /image-view:\/\/sha256\/([a-f0-9]{64}\.(?:png|jpg|gif|webp))/g;
+const REFERENCE_RE = /(?:image-view:\/\/sha256\/|\/image-view\/blobs\/)([a-f0-9]{64}\.(?:png|jpg|gif|webp))/g;
 
 const EXTENSION_BY_MIME: Record<string, string> = {
 	"image/png": "png",

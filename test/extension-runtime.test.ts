@@ -176,7 +176,7 @@ describe("compact editor attachments", () => {
 			const deps = {
 				readImageContentFromPathAsync: vi.fn(async () => image),
 				loadImageContentFromPath: vi.fn(async () => null),
-				storeImage: vi.fn(async () => "image-view://sha256/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png"),
+				storeImage: vi.fn(async () => "file:///tmp/image-view/blobs/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png"),
 			};
 			const { handlers, ctx } = makeHarness(deps);
 			ctx.ui.getEditorText = vi.fn(() => "/tmp/screenshot.png\nfix the conflict");
@@ -195,7 +195,7 @@ describe("compact editor attachments", () => {
 
 			expect(result).toEqual({
 				action: "transform",
-				text: "[Image #1](image-view://sha256/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png)\nfix the conflict",
+				text: "[Image #1](file:///tmp/image-view/blobs/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png)\nfix the conflict",
 				images: [image],
 			});
 		} finally {
@@ -212,7 +212,7 @@ describe("compact editor attachments", () => {
 		const deps = {
 			readImageContentFromPathAsync: vi.fn(async () => image),
 			loadImageContentFromPath: vi.fn(async () => null),
-			storeImage: vi.fn(async () => "image-view://sha256/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png"),
+			storeImage: vi.fn(async () => "file:///tmp/image-view/blobs/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png"),
 		};
 		const { handlers, ctx } = makeHarness(deps);
 
@@ -223,7 +223,7 @@ describe("compact editor attachments", () => {
 
 		expect(result).toEqual({
 			action: "transform",
-			text: "[Image #1](image-view://sha256/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png) explain this",
+			text: "[Image #1](file:///tmp/image-view/blobs/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png) explain this",
 			images: [image],
 		});
 	});

@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 import { convertToPng, resizeImage } from "@earendil-works/pi-coding-agent";
 import { getCapabilities } from "@earendil-works/pi-tui";
 import {
@@ -32,7 +33,7 @@ const shrinkAttachmentForSubmission: ImageResizer = (image) =>
 
 
 async function persistImage(image: Parameters<typeof putImageBlob>[0]): Promise<string> {
-	return (await putImageBlob(image)).reference;
+	return pathToFileURL((await putImageBlob(image)).displayPath).href;
 }
 
 function resolvePersistedImage(reference: string): string | undefined {

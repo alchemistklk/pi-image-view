@@ -50,11 +50,11 @@ Then paste an image with `Ctrl+V` (`Alt+V` on Windows/WSL). If Pi is already run
    ~/.pi/agent/image-view/blobs/<sha256>.<ext>
    ```
 
-4. Session text stores an internal `image-view://sha256/...` reference behind `[Image #N]`.
-5. A display-only Markdown transformer turns that reference into a clickable local `file://` link.
-6. Before each model call, a context hook removes the internal target, leaving the model only `[Image #N]` plus the image attachment.
+4. Session text stores a clickable `file://` link to that persistent blob behind `[Image #N]`.
+5. Before each model call, a context hook removes the local target, leaving the model only `[Image #N]` plus the image attachment.
+6. A display-only Markdown transformer keeps compatibility with pre-release `image-view://` references.
 
-The original `/var/folders/...` clipboard path is neither persisted in message text nor sent to the model.
+The original `/var/folders/...` clipboard path is neither persisted in message text nor sent to the model. The persistent blob path is stored only as history display metadata and is stripped from model-facing context.
 
 ## Blob lifecycle
 

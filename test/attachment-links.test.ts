@@ -8,6 +8,7 @@ import {
 
 describe("attachment links", () => {
 	const ref = `image-view://sha256/${"a".repeat(64)}.png`;
+	const fileRef = `file:///tmp/image-view/blobs/${"a".repeat(64)}.png`;
 
 	it("stores an internal reference while rendering a clickable file link", () => {
 		const stored = createImageMarkerLink("[Image #1]", ref);
@@ -15,6 +16,13 @@ describe("attachment links", () => {
 		expect(renderImageMarkerLinks(stored, () => "/tmp/blob.png")).toBe(
 			"[Image #1](file:///tmp/blob.png)",
 		);
+	});
+
+	it("keeps direct file targets clickable while hiding them from model context", () => {
+		const stored = createImageMarkerLink("[Image #1]", fileRef);
+		expect(stored).toBe(`[Image #1](${fileRef})`);
+		expect(renderImageMarkerLinks(stored, () => undefined)).toBe(stored);
+		expect(stripImageMarkerLinks(stored)).toBe("[Image #1]");
 	});
 
 	it("removes internal targets from model-facing text", () => {
