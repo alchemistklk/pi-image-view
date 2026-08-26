@@ -132,15 +132,9 @@ For v0.2.0:
 
 ## Direct paste and atomic markers
 
-On macOS, Windows, and WSL, `pi-image-view` enables its editor by default. It reads image clipboard data itself and inserts `[Image #N]` directly, so Pi never renders a temporary clipboard path. Left/right navigation jumps across the whole marker, and Backspace/Delete removes it in one undoable action. Clipboard text still pastes as text.
+On macOS, Windows, and WSL, `pi-image-view` automatically enables its editor. It reads image clipboard data itself and inserts `[Image #N]` directly, so Pi never renders a temporary clipboard path. Left/right navigation jumps across the whole marker, and Backspace/Delete removes it in one undoable action. Clipboard text still pastes as text.
 
-Because this replaces Pi's active editor, disable it when using Vim or another editor extension:
-
-```bash
-PI_IMAGE_VIEW_ATOMIC_MARKERS=0 pi
-```
-
-Native Linux keeps Pi's default editor and uses paste-triggered burst scans by default. It can opt in with `PI_IMAGE_VIEW_ATOMIC_MARKERS=1`, but direct clipboard image reading is currently limited to macOS, Windows, and WSL. Programmatic integrations can also use `createImageView({ atomicMarkers: true | false })`.
+Native Linux automatically keeps Pi's default editor and uses paste-triggered burst scans because direct clipboard image reading is not yet available there. No environment-variable or wrapper configuration is required.
 
 ## Terminal support
 

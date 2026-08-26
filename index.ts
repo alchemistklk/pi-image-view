@@ -54,21 +54,15 @@ function resolvePersistedImage(reference: string): string | undefined {
 }
 
 
-export interface ImageViewOptions {
-	/** Replace Pi's editor so [Image #N] moves/deletes as one token. Disabled by default to avoid editor conflicts. */
-	atomicMarkers?: boolean;
-}
-
-export function createImageView(options: ImageViewOptions = {}) {
-	const envAtomic = process.env.PI_IMAGE_VIEW_ATOMIC_MARKERS;
-	const atomicMarkers = options.atomicMarkers ?? (envAtomic === "0" ? false : envAtomic === "1" ? true : supportsDirectClipboard());
+export function createImageView() {
+	const useDirectEditor = supportsDirectClipboard();
 	return (pi: any): void => registerImagePreviewExtension(pi, {
 		readImageContentFromPathAsync,
 		maybeResizeImage: buildPreviewThumbnail,
 		resizeDetailImage: buildDetailImage,
 		normalizeImageForMatching,
 		isImagePasteInput: (data) => matchesKey(data, "ctrl+v") || matchesKey(data, "alt+v"),
-		createAtomicEditor: atomicMarkers
+		createAtomicEditor: useDirectEditor
 			? (tui, theme, keys, attachImage) => createAtomicMarkerEditor(tui as any, theme as any, keys as any, { readClipboard: readDirectClipboard, attachImage })
 			: undefined,
 		storeImage: persistImage,
