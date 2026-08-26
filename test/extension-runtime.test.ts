@@ -90,7 +90,7 @@ describe("submit attachment resizing", () => {
 			data: "RAW_B",
 			mimeType: "image/png",
 		};
-		const byPath: Record<string, any> = {
+		const byPath: Record<string, typeof rawA> = {
 			"/tmp/a.png": rawA,
 			"/tmp/b.png": rawB,
 		};
@@ -295,6 +295,84 @@ describe("compact editor attachments", () => {
 			);
 
 			expect(result).toEqual({ action: "continue" });
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+});
+
+
+describe("draft scan lifecycle", () => {
+	it("discards a stale async scan after the editor changes", async () => {
+		vi.useFakeTimers();
+		try {
+			let editorText = "/tmp/stale.png";
+			let resolveRead!: (image: any) => void;
+			const read = vi.fn(() => new Promise((resolve) => { resolveRead = resolve; }));
+			const { handlers, ctx } = makeHarness({
+				readImageContentFromPathAsync: read,
+				loadImageContentFromPath: vi.fn(async () => null),
+			});
+			ctx.ui.getEditorText = vi.fn(() => editorText);
+			ctx.ui.setEditorText = vi.fn((text: string) => { editorText = text; });
+
+			await handlers.get("session_start")!(undefined, ctx);
+			await vi.advanceTimersByTimeAsync(250);
+			expect(read).toHaveBeenCalledTimes(1);
+
+			editorText = "new prompt";
+			await vi.advanceTimersByTimeAsync(250);
+			resolveRead({ type: "image", data: "STALE", mimeType: "image/png" });
+			await Promise.resolve();
+
+			expect(ctx.ui.setEditorText).not.toHaveBeenCalled();
+			await handlers.get("session_shutdown")!(undefined, ctx);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("does not rescan unchanged editor text", async () => {
+		vi.useFakeTimers();
+		try {
+			const read = vi.fn(async () => null);
+			const { handlers, ctx } = makeHarness({
+				readImageContentFromPathAsync: read,
+				loadImageContentFromPath: vi.fn(async () => null),
+			});
+			ctx.ui.getEditorText = vi.fn(() => "/tmp/unchanged.png");
+
+			await handlers.get("session_start")!(undefined, ctx);
+			await vi.advanceTimersByTimeAsync(1_000);
+
+			expect(read).toHaveBeenCalledTimes(1);
+			await handlers.get("session_shutdown")!(undefined, ctx);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("polls only with UI and cleans up on session shutdown", async () => {
+		vi.useFakeTimers();
+		try {
+			const deps = {
+				readImageContentFromPathAsync: vi.fn(async () => null),
+				loadImageContentFromPath: vi.fn(async () => null),
+			};
+			const headless = makeHarness(deps);
+			headless.ctx.hasUI = false;
+			await headless.handlers.get("session_start")!(undefined, headless.ctx);
+			await vi.advanceTimersByTimeAsync(500);
+			expect(headless.ctx.ui.getEditorText).not.toHaveBeenCalled();
+			expect(headless.handlers.has("session_switch")).toBe(false);
+
+			const interactive = makeHarness(deps);
+			await interactive.handlers.get("session_start")!(undefined, interactive.ctx);
+			await vi.advanceTimersByTimeAsync(250);
+			expect(interactive.ctx.ui.getEditorText).toHaveBeenCalledTimes(1);
+			await interactive.handlers.get("session_shutdown")!(undefined, interactive.ctx);
+			await vi.advanceTimersByTimeAsync(500);
+			expect(interactive.ctx.ui.getEditorText).toHaveBeenCalledTimes(1);
 		} finally {
 			vi.useRealTimers();
 		}

@@ -40,6 +40,7 @@ export type ExtensionDeps = {
 
 type PiLike = {
 	on(event: string, handler: (...args: any[]) => any): void;
+	registerCommand?: (name: string, options: { description?: string; handler: (args: string, ctx: CtxLike) => Promise<void> | void }) => void;
 	registerMarkdownTransformer?: (
 		transformer: (markdown: string, context: { messageType: string }) => string,
 	) => void;
@@ -47,8 +48,9 @@ type PiLike = {
 
 type CtxLike = {
 	cwd: string;
+	hasUI?: boolean;
+	mode?: "tui" | "rpc" | "json" | "print";
 	isIdle(): boolean;
-	sessionManager?: { getSessionDir(): string };
 	ui: {
 		setWidget(
 			key: string,
@@ -118,6 +120,8 @@ export function registerImagePreviewExtension(
 	let latestCtx: CtxLike | null = null;
 	let nextPlaceholderNumber = 1;
 	let scanInFlight = false;
+	let scanGeneration = 0;
+	let lastScannedText: string | undefined;
 
 	// ── Helpers ────────────────────────────────────────────
 
@@ -190,6 +194,8 @@ export function registerImagePreviewExtension(
 		}
 		tracked = new Map();
 		nextPlaceholderNumber = 1;
+		scanGeneration += 1;
+		lastScannedText = undefined;
 		ctx.ui.setWidget(WIDGET_KEY, undefined);
 	}
 
@@ -199,35 +205,44 @@ export function registerImagePreviewExtension(
 	 * Async to avoid blocking the event loop with file I/O.
 	 */
 	async function scanEditorText(ctx: CtxLike): Promise<void> {
+		let text: string;
+		try {
+			text = ctx.ui.getEditorText();
+		} catch (err) {
+			debugLog("Failed to get editor text", err);
+			return;
+		}
+		if (text === lastScannedText) return;
+		lastScannedText = text;
+		const generation = ++scanGeneration;
 		if (scanInFlight) return;
+
 		scanInFlight = true;
 		try {
-			let text: string;
-			try {
-				text = ctx.ui.getEditorText();
-			} catch (err) {
-				debugLog("Failed to get editor text", err);
-				return;
-			}
-
 			const visiblePlaceholders = placeholdersIn(text);
+			const nextTracked = new Map(tracked);
 			let changed = false;
-			for (const placeholder of tracked.keys()) {
+			for (const placeholder of nextTracked.keys()) {
 				if (!visiblePlaceholders.has(placeholder)) {
-					tracked.delete(placeholder);
+					nextTracked.delete(placeholder);
 					changed = true;
 				}
 			}
 
 			let renderedText = text;
+			const newEntries: TrackedImage[] = [];
 			for (const { raw, path: filePath } of extractImagePaths(text)) {
 				const image = await deps.readImageContentFromPathAsync(filePath);
+				if (generation !== scanGeneration) {
+					lastScannedText = undefined;
+					return;
+				}
 				if (!image) continue;
 
 				let placeholder: string;
 				do {
 					placeholder = `[Image #${nextPlaceholderNumber++}]`;
-				} while (renderedText.includes(placeholder) || tracked.has(placeholder));
+				} while (renderedText.includes(placeholder) || nextTracked.has(placeholder));
 
 				const entry: TrackedImage = {
 					filePath,
@@ -235,15 +250,25 @@ export function registerImagePreviewExtension(
 					image,
 					label: trimImageLabel(filePath),
 				};
-				tracked.set(placeholder, entry);
+				nextTracked.set(placeholder, entry);
+				newEntries.push(entry);
 				renderedText = renderedText.replace(raw, placeholder);
 				changed = true;
-
-				if (deps.maybeResizeImage) void ensurePreview(entry);
 			}
 
-			if (renderedText !== text) ctx.ui.setEditorText(renderedText);
+			if (generation !== scanGeneration) {
+				lastScannedText = undefined;
+				return;
+			}
+			tracked = nextTracked;
+			if (renderedText !== text) {
+				ctx.ui.setEditorText(renderedText);
+				lastScannedText = renderedText;
+			}
 			if (changed) refreshWidget(ctx);
+			for (const entry of newEntries) {
+				if (deps.maybeResizeImage) void ensurePreview(entry);
+			}
 		} finally {
 			scanInFlight = false;
 		}
@@ -274,29 +299,26 @@ export function registerImagePreviewExtension(
 
 	// ── Event handlers ─────────────────────────────────────
 
-	// Clean up resources when the process exits
 	const cleanup = (): void => {
 		stopPolling();
+		scanGeneration += 1;
+		lastScannedText = undefined;
+		latestCtx = null;
 		if (gallery) {
 			gallery.dispose();
 			gallery = null;
 		}
 	};
-	process.on("exit", cleanup);
-	process.on("SIGINT", cleanup);
-	process.on("SIGTERM", cleanup);
 
 	pi.on("session_start", async (_event: unknown, ctx: CtxLike) => {
 		latestCtx = ctx;
 		resetDraft(ctx);
-		startPolling();
+		if (ctx.hasUI !== false && ctx.mode !== "print" && ctx.mode !== "json") {
+			startPolling();
+		}
 	});
 
-	pi.on("session_switch", async (_event: unknown, ctx: CtxLike) => {
-		latestCtx = ctx;
-		resetDraft(ctx);
-		startPolling();
-	});
+	pi.on("session_shutdown", cleanup);
 
 	pi.on("tool_result", async (event: ToolResultEvent, ctx: CtxLike) => {
 		latestCtx = ctx;
