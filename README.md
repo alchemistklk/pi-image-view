@@ -57,13 +57,13 @@ The original `/var/folders/...` clipboard path is never sent to the model. Norma
 
 ## Model image context
 
-Use `/image-view-context` to inspect or change which existing image attachments are included in model calls:
+Use `/pi-image-view` to inspect or change which existing image attachments are included in model calls:
 
 ```text
-/image-view-context status
-/image-view-context all
-/image-view-context latest
-/image-view-context none
+/pi-image-view status
+/pi-image-view all
+/pi-image-view latest
+/pi-image-view none
 ```
 
 The default is `all`. `latest` keeps images from only the newest image-bearing user turn, including tool-result images from that turn, while `none` removes every image attachment. The setting is in-memory and applies only to the current extension session; starting another session resets it to `all`.

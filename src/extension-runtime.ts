@@ -112,7 +112,7 @@ export function registerImagePreviewExtension(
 
 	let contextMode: ImageContextMode = "all";
 
-	pi.registerCommand?.("image-view-context", {
+	pi.registerCommand?.("pi-image-view", {
 		description: "Control which images are included in model context (all, latest, none)",
 		handler: (args, ctx) => {
 			const requested = args.trim();
@@ -121,7 +121,7 @@ export function registerImagePreviewExtension(
 				return;
 			}
 			if (requested !== "all" && requested !== "latest" && requested !== "none") {
-				ctx.ui.notify("Usage: /image-view-context [status|all|latest|none]", "error");
+				ctx.ui.notify("Usage: /pi-image-view [status|all|latest|none]", "error");
 				return;
 			}
 			contextMode = requested;

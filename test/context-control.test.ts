@@ -30,7 +30,7 @@ function contextHarness() {
 		hasUI: false,
 		ui: { notify, setWidget: vi.fn(), getEditorText: vi.fn(() => ""), setEditorText: vi.fn(), theme: {} },
 	};
-	return { handlers, command: commands.get("image-view-context")!, ctx, notify };
+	return { handlers, command: commands.get("pi-image-view")!, ctx, notify };
 }
 
 describe("model image context filtering", () => {
@@ -83,7 +83,7 @@ describe("model image context filtering", () => {
 	});
 });
 
-describe("/image-view-context", () => {
+describe("/pi-image-view", () => {
 	it("shows status, validates arguments, updates the current session mode, and resets on session start", async () => {
 		const { handlers, command, ctx, notify } = contextHarness();
 		const event = { messages: [{ role: "user", content: [image("ONE")] }] };
@@ -93,7 +93,7 @@ describe("/image-view-context", () => {
 		command.handler("none", ctx);
 		expect(notify.mock.calls).toEqual([
 			["Image context mode: all", "info"],
-			["Usage: /image-view-context [status|all|latest|none]", "error"],
+			["Usage: /pi-image-view [status|all|latest|none]", "error"],
 			["Image context mode: none", "info"],
 		]);
 		expect(handlers.get("context")!(event).messages[0].content).toEqual([
