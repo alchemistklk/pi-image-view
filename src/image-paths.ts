@@ -1,3 +1,6 @@
+import { homedir } from "node:os";
+import { resolve } from "node:path";
+
 export interface DetectedImagePath {
 	/** Exact substring as it appears in the editor text (used for tracking/removal). */
 	raw: string;
@@ -20,6 +23,8 @@ const IMAGE_PATH_RE = new RegExp(
 export interface PathNormalizationOptions {
 	platform?: NodeJS.Platform;
 	env?: NodeJS.ProcessEnv;
+	cwd?: string;
+	home?: string;
 }
 
 function stripQuotes(raw: string): string {
@@ -44,15 +49,22 @@ export function normalizeDetectedImagePath(
 		return value;
 	}
 	if (/^\\\\/.test(value)) return value;
-	return value.replace(/\\(.)/g, "$1");
+	if (value === "~" || value.startsWith("~/")) {
+		return resolve(options.home ?? homedir(), value === "~" ? "" : value.slice(2));
+	}
+	const unescaped = value.replace(/\\(.)/g, "$1");
+	if (unescaped.startsWith("./") || unescaped.startsWith("../")) {
+		return resolve(options.cwd ?? process.cwd(), unescaped);
+	}
+	return unescaped;
 }
 
-export function extractImagePaths(text: string): DetectedImagePath[] {
+export function extractImagePaths(text: string, options: PathNormalizationOptions = {}): DetectedImagePath[] {
 	const re = new RegExp(IMAGE_PATH_RE.source, IMAGE_PATH_RE.flags);
 	const results: DetectedImagePath[] = [];
 	for (const match of text.matchAll(re)) {
 		const raw = match[0];
-		results.push({ raw, path: normalizeDetectedImagePath(raw) });
+		results.push({ raw, path: normalizeDetectedImagePath(raw, options) });
 	}
 	return results;
 }

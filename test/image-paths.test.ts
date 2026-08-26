@@ -74,4 +74,16 @@ it("accepts common punctuation immediately after unquoted paths", () => {
 	]);
 });
 
+
+it("expands home-relative and resolves cwd-relative paths", () => {
+	expect(extractImagePaths("~/shot.png ./nested/a.jpg ../up/b.webp", {
+		home: "/Users/test",
+		cwd: "/work/project",
+	})).toEqual([
+		{ raw: "~/shot.png", path: "/Users/test/shot.png" },
+		{ raw: "./nested/a.jpg", path: "/work/project/nested/a.jpg" },
+		{ raw: "../up/b.webp", path: "/work/up/b.webp" },
+	]);
+});
+
 });

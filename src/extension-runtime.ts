@@ -53,6 +53,7 @@ type CtxLike = {
 	mode?: "tui" | "rpc" | "json" | "print";
 	isIdle(): boolean;
 	ui: {
+		getEditorComponent?(): ((tui: unknown, theme: unknown, keybindings: unknown) => unknown) | undefined;
 		onTerminalInput?(handler: (data: string) => { consume?: boolean; data?: string } | undefined): () => void;
 		setEditorComponent?(factory: ((tui: unknown, theme: unknown, keybindings: unknown) => unknown) | undefined): void;
 		setWidget(
@@ -162,6 +163,8 @@ export function registerImagePreviewExtension(
 		return { messages: sanitizeModelMessages(event.messages, clearBeforeIndex) };
 	});
 
+	let installedEditorFactory: ((tui: unknown, theme: unknown, keybindings: unknown) => unknown) | undefined;
+	let previousEditorFactory: ((tui: unknown, theme: unknown, keybindings: unknown) => unknown) | undefined;
 	let tracked: Map<string, TrackedImage> = new Map();
 	let gallery: ImageGallery | null = null;
 	let pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -305,7 +308,7 @@ export function registerImagePreviewExtension(
 			let renderedText = text;
 			let hadReadFailure = false;
 			const newEntries: TrackedImage[] = [];
-			for (const { raw, path: filePath } of extractImagePaths(text)) {
+			for (const { raw, path: filePath } of extractImagePaths(text, { cwd: ctx.cwd })) {
 				const image = await deps.readImageContentFromPathAsync(filePath);
 				if (generation !== scanGeneration) {
 					lastScannedText = undefined;
@@ -419,9 +422,10 @@ export function registerImagePreviewExtension(
 		latestCtx = ctx;
 		resetDraft(ctx);
 		if (deps.createAtomicEditor && ctx.ui.setEditorComponent) {
-			ctx.ui.setEditorComponent((tui, theme, keybindings) =>
-				deps.createAtomicEditor!(tui, theme, keybindings, attachClipboardImage),
-			);
+			previousEditorFactory = ctx.ui.getEditorComponent?.();
+			installedEditorFactory = (tui, theme, keybindings) =>
+				deps.createAtomicEditor!(tui, theme, keybindings, attachClipboardImage);
+			ctx.ui.setEditorComponent(installedEditorFactory);
 		}
 		if (ctx.hasUI !== false && ctx.mode !== "print" && ctx.mode !== "json") {
 			startPolling();
@@ -436,7 +440,14 @@ export function registerImagePreviewExtension(
 
 	pi.on("session_shutdown", (_event: unknown, ctx: CtxLike) => {
 		cleanup();
-		if (deps.createAtomicEditor) ctx.ui.setEditorComponent?.(undefined);
+		if (
+			installedEditorFactory &&
+			ctx.ui.getEditorComponent?.() === installedEditorFactory
+		) {
+			ctx.ui.setEditorComponent?.(previousEditorFactory);
+		}
+		installedEditorFactory = undefined;
+		previousEditorFactory = undefined;
 	});
 
 	pi.on("tool_result", async (event: ToolResultEvent, ctx: CtxLike) => {
@@ -454,7 +465,7 @@ export function registerImagePreviewExtension(
 		latestCtx = ctx;
 		const fullText = (event.text || "").trim();
 
-		const detectedPaths = extractImagePaths(fullText);
+		const detectedPaths = extractImagePaths(fullText, { cwd: ctx.cwd });
 		if (
 			(fullText.startsWith("/") && detectedPaths.length === 0) ||
 			fullText.trimStart().startsWith("!")

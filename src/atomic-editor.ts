@@ -21,17 +21,17 @@ export class ImageViewAtomicEditor extends CustomEditor {
 		tui: TUI,
 		theme: EditorTheme,
 		private readonly imageViewKeys: KeybindingsManager,
-		private readonly clipboardOptions: { readClipboard: () => ClipboardPayload; attachImage: (image: ImageContent) => string },
+		private readonly clipboardOptions: { readClipboard: () => Promise<ClipboardPayload>; attachImage: (image: ImageContent) => string },
 	) {
 		super(tui, theme, imageViewKeys);
 		const internals = this as unknown as EditorInternals;
 		internals.segment = (text, mode = "grapheme") =>
 			segmentAtomicImageMarkers(text, mode === "word" ? wordSegmenter : graphemeSegmenter);
-		this.onPasteImage = () => this.handleClipboardPaste();
+		this.onPasteImage = () => { void this.handleClipboardPaste(); };
 	}
 
-	private handleClipboardPaste(): void {
-		const payload = this.clipboardOptions.readClipboard();
+	private async handleClipboardPaste(): Promise<void> {
+		const payload = await this.clipboardOptions.readClipboard();
 		if (payload.kind === "image") {
 			this.insertTextAtCursor(this.clipboardOptions.attachImage(payload.image));
 			this.tui.requestRender();
@@ -58,7 +58,7 @@ export class ImageViewAtomicEditor extends CustomEditor {
 			this.tui.requestRender();
 			return;
 		}
-		this.deleteRange(cursor.line, span.start, span.end);
+		if (!this.deleteRange(cursor.line, span.start, span.end)) super.handleInput(data);
 	}
 
 	private setCursor(col: number): void {
@@ -67,9 +67,10 @@ export class ImageViewAtomicEditor extends CustomEditor {
 		else internals.state.cursorCol = col;
 	}
 
-	private deleteRange(lineIndex: number, start: number, end: number): void {
+	private deleteRange(lineIndex: number, start: number, end: number): boolean {
 		const internals = this as unknown as EditorInternals;
-		internals.pushUndoSnapshot?.();
+		if (!internals.pushUndoSnapshot) return false;
+		internals.pushUndoSnapshot();
 		const line = internals.state.lines[lineIndex] ?? "";
 		internals.state.lines[lineIndex] = line.slice(0, start) + line.slice(end);
 		internals.state.cursorLine = lineIndex;
@@ -78,6 +79,7 @@ export class ImageViewAtomicEditor extends CustomEditor {
 		internals.historyIndex = -1;
 		this.onChange?.(this.getText());
 		this.tui.requestRender();
+		return true;
 	}
 }
 
@@ -85,7 +87,7 @@ export function createAtomicMarkerEditor(
 	tui: TUI,
 	theme: EditorTheme,
 	keys: KeybindingsManager,
-	options: { readClipboard: () => ClipboardPayload; attachImage: (image: ImageContent) => string },
+	options: { readClipboard: () => Promise<ClipboardPayload>; attachImage: (image: ImageContent) => string },
 ) {
 	return new ImageViewAtomicEditor(tui, theme, keys, options);
 }
