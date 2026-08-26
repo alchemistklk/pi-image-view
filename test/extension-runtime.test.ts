@@ -13,9 +13,11 @@ type Handler = (...args: any[]) => any;
 
 function makeHarness(deps: any) {
 	const handlers = new Map<string, Handler>();
+	const commands = new Map<string, { handler: (args: string, ctx: any) => void }>();
 	let markdownTransformer: ((markdown: string, context: { messageType: string }) => string) | undefined;
 	const pi = {
 		on: (event: string, handler: Handler) => handlers.set(event, handler),
+		registerCommand: (name: string, options: { handler: (args: string, ctx: any) => void }) => commands.set(name, options),
 		registerMarkdownTransformer: (transformer: typeof markdownTransformer) => {
 			markdownTransformer = transformer;
 		},
@@ -25,6 +27,8 @@ function makeHarness(deps: any) {
 		hasUI: true,
 		isIdle: () => true,
 		ui: {
+			setEditorComponent: vi.fn(),
+			notify: vi.fn(),
 			setWidget: vi.fn(),
 			getEditorText: vi.fn(() => ""),
 			setEditorText: vi.fn(),
@@ -32,7 +36,7 @@ function makeHarness(deps: any) {
 		},
 	};
 	registerImagePreviewExtension(pi as any, deps);
-	return { handlers, ctx, getMarkdownTransformer: () => markdownTransformer };
+	return { handlers, command: commands.get("pi-image-view")!, ctx, getMarkdownTransformer: () => markdownTransformer };
 }
 
 describe("compact editor attachments", () => {
@@ -218,6 +222,28 @@ describe("compact editor attachments", () => {
 		expect(normalize).not.toHaveBeenCalled();
 	});
 
+
+	it("uses 1280px detail mode for one submission then returns to preview thumbnails", async () => {
+		const original = { type: "image" as const, data: "ORIGINAL", mimeType: "image/png" };
+		const thumbnail = { ...original, data: "THUMB" };
+		const detail = { ...original, data: "DETAIL" };
+		const deps = {
+			readImageContentFromPathAsync: vi.fn(async () => original),
+			loadImageContentFromPath: vi.fn(async () => null),
+			maybeResizeImage: vi.fn(async () => thumbnail),
+			resizeDetailImage: vi.fn(async () => detail),
+		};
+		const { handlers, command, ctx } = makeHarness(deps);
+		command.handler("detail", ctx);
+
+		const first = await handlers.get("input")!({ text: "/tmp/first.png inspect", images: [] }, ctx);
+		const second = await handlers.get("input")!({ text: "/tmp/second.png inspect", images: [] }, ctx);
+
+		expect(first.images).toEqual([detail]);
+		expect(second.images).toEqual([thumbnail]);
+		expect(deps.resizeDetailImage).toHaveBeenCalledTimes(1);
+	});
+
 	it("does not submit an attachment after its placeholder is deleted", async () => {
 		vi.useFakeTimers();
 		try {
@@ -304,6 +330,21 @@ describe("draft scan lifecycle", () => {
 		} finally {
 			vi.useRealTimers();
 		}
+	});
+
+
+	it("installs and removes the optional atomic editor with the session lifecycle", async () => {
+		const createAtomicEditor = vi.fn();
+		const { handlers, ctx } = makeHarness({
+			readImageContentFromPathAsync: vi.fn(async () => null),
+			loadImageContentFromPath: vi.fn(async () => null),
+			createAtomicEditor,
+		});
+
+		await handlers.get("session_start")!(undefined, ctx);
+		expect(ctx.ui.setEditorComponent).toHaveBeenCalledWith(createAtomicEditor);
+		await handlers.get("session_shutdown")!(undefined, ctx);
+		expect(ctx.ui.setEditorComponent).toHaveBeenLastCalledWith(undefined);
 	});
 
 	it("polls only with UI and cleans up on session shutdown", async () => {

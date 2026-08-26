@@ -28,7 +28,9 @@ export type ExtensionDeps = {
 		filePath: string,
 	) => Promise<ImageContent | null>;
 	maybeResizeImage?: (image: ImageContent) => Promise<ImageContent>;
+	resizeDetailImage?: (image: ImageContent) => Promise<ImageContent>;
 	normalizeImageForMatching?: (image: ImageContent) => Promise<ImageContent>;
+	createAtomicEditor?: (tui: unknown, theme: unknown, keybindings: unknown) => unknown;
 	loadImageContentFromPath: (
 		filePath: string,
 	) => Promise<ImageContent | null>;
@@ -50,6 +52,7 @@ type CtxLike = {
 	mode?: "tui" | "rpc" | "json" | "print";
 	isIdle(): boolean;
 	ui: {
+		setEditorComponent?(factory: ((tui: unknown, theme: unknown, keybindings: unknown) => unknown) | undefined): void;
 		setWidget(
 			key: string,
 			content:
@@ -112,12 +115,19 @@ export function registerImagePreviewExtension(
 	let clearBeforeIndex: number | undefined;
 	let clearOnNextContext = false;
 	let lastContextMessageCount = 0;
+	let detailNextSubmission = false;
 
 	pi.registerCommand?.("pi-image-view", {
-		description: "Clear existing images from subsequent model context",
+		description: "Clear existing image context or arm 1280px detail mode",
 		handler: (args, ctx) => {
-			if (args.trim() !== "clear") {
-				ctx.ui.notify("Usage: /pi-image-view clear", "error");
+			const action = args.trim();
+			if (action === "detail") {
+				detailNextSubmission = true;
+				ctx.ui.notify("Next image submission will use 1280px detail mode", "info");
+				return;
+			}
+			if (action !== "clear") {
+				ctx.ui.notify("Usage: /pi-image-view [clear|detail]", "error");
 				return;
 			}
 			if (lastContextMessageCount > 0) {
@@ -366,16 +376,23 @@ export function registerImagePreviewExtension(
 
 	pi.on("session_start", async (_event: unknown, ctx: CtxLike) => {
 		clearBeforeIndex = undefined;
+		detailNextSubmission = false;
 		clearOnNextContext = false;
 		lastContextMessageCount = 0;
 		latestCtx = ctx;
 		resetDraft(ctx);
+		if (deps.createAtomicEditor && ctx.ui.setEditorComponent) {
+			ctx.ui.setEditorComponent(deps.createAtomicEditor);
+		}
 		if (ctx.hasUI !== false && ctx.mode !== "print" && ctx.mode !== "json") {
 			startPolling();
 		}
 	});
 
-	pi.on("session_shutdown", cleanup);
+	pi.on("session_shutdown", (_event: unknown, ctx: CtxLike) => {
+		cleanup();
+		if (deps.createAtomicEditor) ctx.ui.setEditorComponent?.(undefined);
+	});
 
 	pi.on("tool_result", async (event: ToolResultEvent, ctx: CtxLike) => {
 		latestCtx = ctx;
@@ -383,6 +400,7 @@ export function registerImagePreviewExtension(
 			event,
 			ctx.cwd,
 			deps.loadImageContentFromPath,
+			deps.maybeResizeImage,
 		);
 	});
 
@@ -457,7 +475,9 @@ export function registerImagePreviewExtension(
 		}
 		const preparedImages = await Promise.all(
 			candidates.map(async ({ entry }, candidateIndex) => ({
-				image: await ensurePreview(entry),
+				image: detailNextSubmission && deps.resizeDetailImage
+					? await deps.resizeDetailImage(entry.image)
+					: await ensurePreview(entry),
 				existingIndex: existingIndexes[candidateIndex],
 			})),
 		);
@@ -486,6 +506,7 @@ export function registerImagePreviewExtension(
 			if (existingIndex === undefined) images.push(image);
 			else images[existingIndex] = image;
 		}
+		detailNextSubmission = false;
 		resetDraft(ctx);
 		return { action: "transform", text: transformedText, images };
 	});

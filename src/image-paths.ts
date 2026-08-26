@@ -6,28 +6,43 @@ export interface DetectedImagePath {
 }
 
 const IMAGE_EXT = "(?:png|jpe?g|gif|webp)";
-// A bare path segment is either a backslash-escaped character (e.g. "\ " for a
-// space in a dragged path) or any character that is not whitespace or a
-// shell/glob metacharacter.
 const BARE_PATH = `(?:~/|\\.\\.?/|/)(?:\\\\.|[^\\s:*?"<>|])*\\.${IMAGE_EXT}(?=\\s|$)`;
-// A double-quoted path may contain spaces verbatim; terminals quote dragged
-// paths this way as an alternative to backslash-escaping.
+const WINDOWS_DRIVE_PATH = `[A-Za-z]:[\\\\/][^\\s*?"<>|]*\\.${IMAGE_EXT}(?=\\s|$)`;
+const WINDOWS_UNC_PATH = `\\\\\\\\[^\\\\/\\s:*?"<>|]+[\\\\/][^\\s*?"<>|]*\\.${IMAGE_EXT}(?=\\s|$)`;
 const DOUBLE_QUOTED_PATH = `"(?:\\\\.|[^"\\\\])*\\.${IMAGE_EXT}"`;
 const SINGLE_QUOTED_PATH = `'(?:\\\\.|[^'\\\\])*\\.${IMAGE_EXT}'`;
 const IMAGE_PATH_RE = new RegExp(
-	`${DOUBLE_QUOTED_PATH}|${SINGLE_QUOTED_PATH}|${BARE_PATH}`,
+	`${DOUBLE_QUOTED_PATH}|${SINGLE_QUOTED_PATH}|${WINDOWS_UNC_PATH}|${WINDOWS_DRIVE_PATH}|${BARE_PATH}`,
 	"gi",
 );
 
-/** Strip surrounding quotes and resolve shell-style backslash escapes. */
-function normalizePath(raw: string): string {
-	let value = raw;
-	const quoted =
-		(value.startsWith('"') && value.endsWith('"')) ||
-		(value.startsWith("'") && value.endsWith("'"));
-	if (quoted) {
-		value = value.slice(1, -1);
+export interface PathNormalizationOptions {
+	platform?: NodeJS.Platform;
+	env?: NodeJS.ProcessEnv;
+}
+
+function stripQuotes(raw: string): string {
+	return (
+		(raw.startsWith('"') && raw.endsWith('"')) ||
+		(raw.startsWith("'") && raw.endsWith("'"))
+	) ? raw.slice(1, -1) : raw;
+}
+
+export function normalizeDetectedImagePath(
+	raw: string,
+	options: PathNormalizationOptions = {},
+): string {
+	const value = stripQuotes(raw);
+	const drive = /^([A-Za-z]):[\\\\/](.*)$/.exec(value);
+	if (drive) {
+		const platform = options.platform ?? process.platform;
+		const env = options.env ?? process.env;
+		if (platform === "linux" && (env.WSL_DISTRO_NAME || env.WSL_INTEROP)) {
+			return `/mnt/${drive[1]!.toLowerCase()}/${drive[2]!.replace(/\\/g, "/")}`;
+		}
+		return value;
 	}
+	if (/^\\\\/.test(value)) return value;
 	return value.replace(/\\(.)/g, "$1");
 }
 
@@ -36,7 +51,7 @@ export function extractImagePaths(text: string): DetectedImagePath[] {
 	const results: DetectedImagePath[] = [];
 	for (const match of text.matchAll(re)) {
 		const raw = match[0];
-		results.push({ raw, path: normalizePath(raw) });
+		results.push({ raw, path: normalizeDetectedImagePath(raw) });
 	}
 	return results;
 }

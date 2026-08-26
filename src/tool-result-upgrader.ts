@@ -18,13 +18,16 @@ export async function upgradeScreenshotToolResult(
 	event: ToolResultEventLike,
 	cwd: string,
 	loadImageFromPath: (filePath: string) => Promise<ImageContent | null>,
+	resizeImage?: (image: ImageContent) => Promise<ImageContent>,
 ): Promise<{ content: ContentBlock[] } | undefined> {
-	if (
-		event.isError ||
-		!isScreenshotToolResult(event) ||
-		hasInlineImageContent(event.content)
-	) {
-		return undefined;
+	if (event.isError || !isScreenshotToolResult(event)) return undefined;
+
+	if (hasInlineImageContent(event.content)) {
+		if (!resizeImage) return undefined;
+		const content = await Promise.all(
+			event.content.map((block) => block.type === "image" ? resizeImage(block) : Promise.resolve(block)),
+		);
+		return { content };
 	}
 
 	const text = collectTextContent(event.content);
@@ -36,7 +39,7 @@ export async function upgradeScreenshotToolResult(
 		const resolvedPath = resolveMaybeRelativePath(rawPath, cwd);
 		const image = await loadImageFromPath(resolvedPath);
 		if (image) {
-			images.push(image);
+			images.push(resizeImage ? await resizeImage(image) : image);
 		}
 	}
 

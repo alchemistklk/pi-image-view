@@ -1,6 +1,6 @@
 {
   "name": "pi-image-view",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Persistent clickable image references and compact model thumbnails for the Pi coding agent",
   "keywords": [
     "pi-package",

@@ -94,11 +94,13 @@ describe("model image context clearing", () => {
 		handlers.get("context")!({ messages: old });
 		command.handler("", ctx);
 		command.handler("all", ctx);
+		command.handler("detail", ctx);
 		command.handler("clear", ctx);
 		expect(notify.mock.calls.slice(0, 2)).toEqual([
-			["Usage: /pi-image-view clear", "error"],
-			["Usage: /pi-image-view clear", "error"],
+			["Usage: /pi-image-view [clear|detail]", "error"],
+			["Usage: /pi-image-view [clear|detail]", "error"],
 		]);
+		expect(notify.mock.calls[2]).toEqual(["Next image submission will use 1280px detail mode", "info"]);
 		expect(handlers.get("context")!({ messages: old }).messages[0].content).toEqual([
 			{ type: "text", text: "[Image omitted from model context]" },
 		]);

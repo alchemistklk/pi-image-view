@@ -22,6 +22,10 @@ The reference remains in conversation history and is clickable. The image itself
 - Provides session-scoped control over which image attachments reach the model
 - Handles immediate submit before the editor polling cycle runs
 - Supports multiple images and removal by deleting a placeholder
+- Resizes screenshot tool-result images through the same thumbnail pipeline
+- Supports Windows drive, UNC, and WSL-translated image paths
+- Offers optional atomic marker navigation/deletion for compatible editor setups
+- Offers one-shot 1280px detail mode for small text and dense screenshots
 - Uses the same best-effort 480px PNG thumbnail for inline preview and model submission
 - Supports tmux through Kitty's Unicode placeholder protocol
 
@@ -65,6 +69,14 @@ When a long session has accumulated many images, clear the images that already e
 
 `clear` is non-destructive: session history, clickable references, entries, and stored blobs remain unchanged. Images attached after the command continue to be sent normally. Starting another session or reloading the extension resets the clear boundary.
 
+For a screenshot whose small text needs more detail, arm the next image submission at 1280px:
+
+```text
+/pi-image-view detail
+```
+
+Detail mode applies to the next submitted image batch only, then automatically returns to the 480px default.
+
 The extension always strips local file and internal image-link targets before model calls. Image-only historical messages receive a short text placeholder when their attachment is omitted.
 
 ## Session portability and privacy
@@ -93,7 +105,7 @@ A representative source image changed from 2114×1040 and 867,917 bytes to 480×
 
 `pi-image-view` is forked from `pi-image-preview` and keeps its core Kitty/tmux preview behavior. The main differences are:
 
-| Capability | `pi-image-preview` 0.1.5 | `pi-image-view` 0.1.0 |
+| Capability | `pi-image-preview` 0.1.5 | `pi-image-view` 0.2.0 |
 | --- | --- | --- |
 | Draft thumbnail | Yes | Yes |
 | Typical model payload | 480px preview | 480px preview |
@@ -109,12 +121,22 @@ Both extensions still represent N images as N `ImageContent` blocks until Pi com
 
 ## Release validation
 
-For v0.1.0:
+For v0.2.0:
 
-- 32 automated tests pass across 7 files.
+- 42 automated tests pass across 9 files.
 - Production dependency audit reports 0 vulnerabilities.
 - `npm pack --dry-run` and `npm publish --dry-run` pass.
 - An isolated Pi load probe succeeds.
+
+## Optional atomic markers
+
+By default, `pi-image-view` keeps Pi's active editor untouched so it remains compatible with Vim and other editor extensions. To make `[Image #N]` move and delete as one token, start Pi with:
+
+```bash
+PI_IMAGE_VIEW_ATOMIC_MARKERS=1 pi
+```
+
+Atomic mode replaces the active editor for that session. Left/right navigation jumps across the whole marker, and Backspace/Delete removes it in one undoable action. Do not enable it together with another extension that replaces Pi's editor.
 
 ## Terminal support
 
@@ -128,9 +150,9 @@ set -g allow-passthrough all
 
 Other terminals receive a text-only preview label while keeping compact references and links where OSC 8 is supported.
 
-## Supported formats
+## Supported formats and paths
 
-PNG, JPEG/JPG, GIF (first frame), and WebP. Files larger than 50 MB are ignored.
+PNG, JPEG/JPG, GIF (first frame), and WebP are supported. Files larger than 50 MB are ignored. Paths may be Unix absolute/home/relative paths, Windows drive paths, UNC paths, or quoted paths with spaces. Windows drive paths are translated to `/mnt/<drive>/...` when running under WSL.
 
 ## Development
 

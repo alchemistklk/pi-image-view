@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractImagePaths } from "../src/image-paths.ts";
+import { extractImagePaths, normalizeDetectedImagePath } from "../src/image-paths.ts";
 
 describe("image path detection", () => {
 	it("detects a plain absolute image path", () => {
@@ -47,4 +47,22 @@ describe("image path detection", () => {
 			{ raw: "/b/c.jpeg", path: "/b/c.jpeg" },
 		]);
 	});
+
+it("detects native Windows drive and UNC image paths", () => {
+	expect(extractImagePaths(String.raw`C:\Users\me\shot.png \\server\share\screen.jpg`)).toEqual([
+		{ raw: String.raw`C:\Users\me\shot.png`, path: String.raw`C:\Users\me\shot.png` },
+		{ raw: String.raw`\\server\share\screen.jpg`, path: String.raw`\\server\share\screen.jpg` },
+	]);
+});
+
+it("preserves quoted Windows spaces and converts drive paths under WSL", () => {
+	expect(extractImagePaths(String.raw`"C:\Users\me\My Shot.png"`)).toEqual([
+		{ raw: String.raw`"C:\Users\me\My Shot.png"`, path: String.raw`C:\Users\me\My Shot.png` },
+	]);
+	expect(normalizeDetectedImagePath(String.raw`C:\Users\me\shot.png`, {
+		platform: "linux",
+		env: { WSL_DISTRO_NAME: "Ubuntu" },
+	})).toBe("/mnt/c/Users/me/shot.png");
+});
+
 });

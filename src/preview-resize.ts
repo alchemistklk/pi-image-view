@@ -4,6 +4,8 @@ import type { ImageContent } from "./content.ts";
  * data survives kitty transmission through tmux passthrough. */
 export const PREVIEW_MAX_DIMENSION = 480;
 export const PREVIEW_MAX_BYTES = 2 * 1024 * 1024;
+export const DETAIL_MAX_DIMENSION = 1280;
+export const DETAIL_MAX_BYTES = 4.5 * 1024 * 1024;
 
 type ResizedImage = { data: string; mimeType: string };
 
@@ -41,6 +43,25 @@ export async function resizeForPreview(
 		const png = await deps.convertToPng(small.data, small.mimeType);
 		const final = png ?? small;
 		return { type: "image", data: final.data, mimeType: final.mimeType };
+	} catch {
+		return image;
+	}
+}
+
+/** Build a higher-detail model payload for the next explicitly armed submission. */
+export async function resizeForDetail(
+	image: ImageContent,
+	deps: Pick<PreviewResizeDeps, "resizeImage">,
+): Promise<ImageContent> {
+	try {
+		const resized = await deps.resizeImage(Buffer.from(image.data, "base64"), image.mimeType, {
+			maxWidth: DETAIL_MAX_DIMENSION,
+			maxHeight: DETAIL_MAX_DIMENSION,
+			maxBytes: DETAIL_MAX_BYTES,
+		});
+		return resized
+			? { type: "image", data: resized.data, mimeType: resized.mimeType }
+			: image;
 	} catch {
 		return image;
 	}

@@ -12,7 +12,8 @@ import {
 	type ImageResizer,
 } from "./src/image-content.ts";
 import { registerImagePreviewExtension } from "./src/extension-runtime.ts";
-import { resizeForPreview } from "./src/preview-resize.ts";
+import { resizeForDetail, resizeForPreview } from "./src/preview-resize.ts";
+import { createAtomicMarkerEditor } from "./src/atomic-editor.ts";
 
 // pi bundles the WASM image resizer and PNG converter and exposes them on its
 // package entry. The extension is loaded through jiti, which aliases the
@@ -20,6 +21,9 @@ import { resizeForPreview } from "./src/preview-resize.ts";
 // running agent's implementation (no fragile filesystem lookup needed).
 const buildPreviewThumbnail: ImageResizer = (image) =>
 	resizeForPreview(image, { resizeImage, convertToPng });
+
+const buildDetailImage: ImageResizer = (image) =>
+	resizeForDetail(image, { resizeImage });
 
 const normalizeImageForMatching: ImageResizer = async (image) => {
 	try {
@@ -49,13 +53,24 @@ function resolvePersistedImage(reference: string): string | undefined {
 }
 
 
-export default function (pi: any): void {
-	registerImagePreviewExtension(pi, {
+export interface ImageViewOptions {
+	/** Replace Pi's editor so [Image #N] moves/deletes as one token. Disabled by default to avoid editor conflicts. */
+	atomicMarkers?: boolean;
+}
+
+export function createImageView(options: ImageViewOptions = {}) {
+	return (pi: any): void => registerImagePreviewExtension(pi, {
 		readImageContentFromPathAsync,
 		maybeResizeImage: buildPreviewThumbnail,
+		resizeDetailImage: buildDetailImage,
 		normalizeImageForMatching,
+		createAtomicEditor: options.atomicMarkers || process.env.PI_IMAGE_VIEW_ATOMIC_MARKERS === "1"
+			? createAtomicMarkerEditor
+			: undefined,
 		storeImage: persistImage,
 		resolveImageReference: resolvePersistedImage,
 		loadImageContentFromPath: (filePath) => loadImageContentFromPath(filePath),
 	});
 }
+
+export default createImageView();
