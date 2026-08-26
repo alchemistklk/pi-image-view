@@ -195,7 +195,7 @@ describe("compact editor attachments", () => {
 
 			expect(result).toEqual({
 				action: "transform",
-				text: "[Image #1](file:///tmp/image-view/blobs/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png)\nfix the conflict",
+				text: "[[Image #1]](file:///tmp/image-view/blobs/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png)\nfix the conflict",
 				images: [image],
 			});
 		} finally {
@@ -223,7 +223,7 @@ describe("compact editor attachments", () => {
 
 		expect(result).toEqual({
 			action: "transform",
-			text: "[Image #1](file:///tmp/image-view/blobs/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png) explain this",
+			text: "[[Image #1]](file:///tmp/image-view/blobs/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png) explain this",
 			images: [image],
 		});
 	});
@@ -279,7 +279,7 @@ describe("transcript hyperlinks", () => {
 		const stored = `[Image #1](${ref})`;
 
 		expect(transform(stored, { messageType: "user" })).toBe(
-			"[Image #1](file:///tmp/blob.png)",
+			"[[Image #1]](file:///tmp/blob.png)",
 		);
 		expect(transform(stored, { messageType: "assistant" })).toBe(stored);
 

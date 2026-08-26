@@ -12,15 +12,15 @@ describe("attachment links", () => {
 
 	it("stores an internal reference while rendering a clickable file link", () => {
 		const stored = createImageMarkerLink("[Image #1]", ref);
-		expect(stored).toBe(`[Image #1](${ref})`);
+		expect(stored).toBe(`[[Image #1]](${ref})`);
 		expect(renderImageMarkerLinks(stored, () => "/tmp/blob.png")).toBe(
-			"[Image #1](file:///tmp/blob.png)",
+			"[[Image #1]](file:///tmp/blob.png)",
 		);
 	});
 
 	it("keeps direct file targets clickable while hiding them from model context", () => {
 		const stored = createImageMarkerLink("[Image #1]", fileRef);
-		expect(stored).toBe(`[Image #1](${fileRef})`);
+		expect(stored).toBe(`[[Image #1]](${fileRef})`);
 		expect(renderImageMarkerLinks(stored, () => undefined)).toBe(stored);
 		expect(stripImageMarkerLinks(stored)).toBe("[Image #1]");
 	});
