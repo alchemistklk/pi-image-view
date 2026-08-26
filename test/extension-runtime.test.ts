@@ -13,9 +13,12 @@ type Handler = (...args: any[]) => any;
 
 function makeHarness(deps: any) {
 	const handlers = new Map<string, Handler>();
+	let markdownTransformer: ((markdown: string, context: { messageType: string }) => string) | undefined;
 	const pi = {
 		on: (event: string, handler: Handler) => handlers.set(event, handler),
-		sendUserMessage: vi.fn(),
+		registerMarkdownTransformer: (transformer: typeof markdownTransformer) => {
+			markdownTransformer = transformer;
+		},
 	};
 	const ctx = {
 		cwd: "/tmp",
@@ -28,7 +31,7 @@ function makeHarness(deps: any) {
 		},
 	};
 	registerImagePreviewExtension(pi as any, deps);
-	return { handlers, ctx };
+	return { handlers, ctx, getMarkdownTransformer: () => markdownTransformer };
 }
 
 describe("submit attachment resizing", () => {
@@ -173,6 +176,7 @@ describe("compact editor attachments", () => {
 			const deps = {
 				readImageContentFromPathAsync: vi.fn(async () => image),
 				loadImageContentFromPath: vi.fn(async () => null),
+				storeImage: vi.fn(async () => "image-view://sha256/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png"),
 			};
 			const { handlers, ctx } = makeHarness(deps);
 			ctx.ui.getEditorText = vi.fn(() => "/tmp/screenshot.png\nfix the conflict");
@@ -191,7 +195,7 @@ describe("compact editor attachments", () => {
 
 			expect(result).toEqual({
 				action: "transform",
-				text: "fix the conflict",
+				text: "[Image #1](image-view://sha256/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png)\nfix the conflict",
 				images: [image],
 			});
 		} finally {
@@ -208,6 +212,7 @@ describe("compact editor attachments", () => {
 		const deps = {
 			readImageContentFromPathAsync: vi.fn(async () => image),
 			loadImageContentFromPath: vi.fn(async () => null),
+			storeImage: vi.fn(async () => "image-view://sha256/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png"),
 		};
 		const { handlers, ctx } = makeHarness(deps);
 
@@ -218,7 +223,7 @@ describe("compact editor attachments", () => {
 
 		expect(result).toEqual({
 			action: "transform",
-			text: "explain this",
+			text: "[Image #1](image-view://sha256/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png) explain this",
 			images: [image],
 		});
 	});
@@ -257,5 +262,30 @@ describe("compact editor attachments", () => {
 		} finally {
 			vi.useRealTimers();
 		}
+	});
+});
+
+
+describe("transcript hyperlinks", () => {
+	it("renders links only in user transcript Markdown and strips targets from model context", async () => {
+		const ref = `image-view://sha256/${"a".repeat(64)}.png`;
+		const deps = {
+			readImageContentFromPathAsync: vi.fn(async () => null),
+			loadImageContentFromPath: vi.fn(async () => null),
+			resolveImageReference: vi.fn(() => "/tmp/blob.png"),
+		};
+		const { handlers, getMarkdownTransformer } = makeHarness(deps);
+		const transform = getMarkdownTransformer()!;
+		const stored = `[Image #1](${ref})`;
+
+		expect(transform(stored, { messageType: "user" })).toBe(
+			"[Image #1](file:///tmp/blob.png)",
+		);
+		expect(transform(stored, { messageType: "assistant" })).toBe(stored);
+
+		const context = await handlers.get("context")!({
+			messages: [{ role: "user", content: stored }],
+		});
+		expect(context.messages).toEqual([{ role: "user", content: "[Image #1]" }]);
 	});
 });

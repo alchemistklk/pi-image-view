@@ -1,5 +1,10 @@
 import path from "node:path";
-import type { ImageContent, ContentBlock } from "./content.ts";
+import type { ImageContent } from "./content.ts";
+import {
+	createImageMarkerLink,
+	renderImageMarkerLinks,
+	sanitizeModelMessages,
+} from "./attachment-links.ts";
 import { ImageGallery, type GalleryImage } from "./image-gallery.ts";
 import { extractImagePaths } from "./image-paths.ts";
 import { upgradeScreenshotToolResult } from "./tool-result-upgrader.ts";
@@ -28,19 +33,22 @@ export type ExtensionDeps = {
 	/** Downscale the full-size attachment below the provider's per-image byte
 	 * limit before it is submitted. Absent means submit the image unchanged. */
 	resizeForSubmission?: (image: ImageContent) => Promise<ImageContent>;
+	storeImage?: (image: ImageContent) => Promise<string | undefined>;
+	resolveImageReference?: (reference: string) => string | undefined;
+	collectGarbage?: (sessionDir: string) => Promise<unknown>;
 };
 
 type PiLike = {
 	on(event: string, handler: (...args: any[]) => any): void;
-	sendUserMessage(
-		content: string | ContentBlock[],
-		options?: { deliverAs?: "steer" | "followUp" },
-	): void;
+	registerMarkdownTransformer?: (
+		transformer: (markdown: string, context: { messageType: string }) => string,
+	) => void;
 };
 
 type CtxLike = {
 	cwd: string;
 	isIdle(): boolean;
+	sessionManager?: { getSessionDir(): string };
 	ui: {
 		setWidget(
 			key: string,
@@ -81,16 +89,6 @@ function placeholdersIn(text: string): Set<string> {
 	return new Set(text.match(IMAGE_PLACEHOLDER_RE) ?? []);
 }
 
-function stripAttachmentTokens(text: string, tokens: string[]): string {
-	let stripped = text;
-	for (const token of tokens) stripped = stripped.split(token).join("");
-	return stripped
-		.split("\n")
-		.map((line) => line.replace(/[ \t]{2,}/g, " ").trimEnd())
-		.join("\n")
-		.trim();
-}
-
 /** Produce a label from an image path — just the filename. */
 function trimImageLabel(filePath: string): string {
 	return path.basename(filePath);
@@ -102,6 +100,18 @@ export function registerImagePreviewExtension(
 	pi: PiLike,
 	deps: ExtensionDeps,
 ): void {
+	if (pi.registerMarkdownTransformer && deps.resolveImageReference) {
+		pi.registerMarkdownTransformer((markdown, context) =>
+			context.messageType === "user"
+				? renderImageMarkerLinks(markdown, deps.resolveImageReference!)
+				: markdown,
+		);
+	}
+
+	pi.on("context", (event: { messages: Array<{ content?: unknown }> }) => ({
+		messages: sanitizeModelMessages(event.messages),
+	}));
+
 	let tracked: Map<string, TrackedImage> = new Map();
 	let gallery: ImageGallery | null = null;
 	let pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -270,6 +280,12 @@ export function registerImagePreviewExtension(
 		latestCtx = ctx;
 		resetDraft(ctx);
 		startPolling();
+		const sessionDir = ctx.sessionManager?.getSessionDir();
+		if (sessionDir && deps.collectGarbage) {
+			void deps.collectGarbage(sessionDir).catch((error) => {
+				debugLog("Failed to collect unreferenced image blobs", error);
+			});
+		}
 	});
 
 	pi.on("session_switch", async (_event: unknown, ctx: CtxLike) => {
@@ -311,12 +327,16 @@ export function registerImagePreviewExtension(
 		for (const { raw, path: filePath } of detectedPaths) {
 			const image = await deps.readImageContentFromPathAsync(filePath);
 			if (!image) continue;
+			let placeholder: string;
+			do {
+				placeholder = `[Image #${nextPlaceholderNumber++}]`;
+			} while (fullText.includes(placeholder) || tracked.has(placeholder));
 			candidates.push({
 				token: raw,
 				index: fullText.indexOf(raw),
 				entry: {
 					filePath,
-					placeholder: raw,
+					placeholder,
 					image,
 					label: trimImageLabel(filePath),
 				},
@@ -333,19 +353,28 @@ export function registerImagePreviewExtension(
 					: Promise.resolve(entry.image),
 			),
 		);
-		const transformedText = stripAttachmentTokens(
-			fullText,
-			candidates.map(({ token }) => token),
+		const references = await Promise.all(
+			usedImages.map(async (image) => {
+				if (!deps.storeImage) return undefined;
+				try {
+					return await deps.storeImage(image);
+				} catch (error) {
+					debugLog("Failed to persist image attachment", error);
+					return undefined;
+				}
+			}),
 		);
+		let transformedText = fullText;
+		for (let index = 0; index < candidates.length; index += 1) {
+			const candidate = candidates[index]!;
+			const reference = references[index];
+			const marker = reference
+				? createImageMarkerLink(candidate.entry.placeholder, reference)
+				: candidate.entry.placeholder;
+			transformedText = transformedText.replace(candidate.token, marker);
+		}
 		const images = [...(event.images ?? []), ...usedImages];
 		resetDraft(ctx);
-
-		if (!transformedText) {
-			pi.sendUserMessage(images, ctx.isIdle() ? undefined : { deliverAs: "steer" });
-			return { action: "handled" };
-		}
-
 		return { action: "transform", text: transformedText, images };
 	});
-
 }

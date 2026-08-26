@@ -1,4 +1,14 @@
+import { existsSync } from "node:fs";
 import { convertToPng, resizeImage } from "@earendil-works/pi-coding-agent";
+import { getCapabilities } from "@earendil-works/pi-tui";
+import {
+	collectReferencedBlobNames,
+	defaultBlobRoot,
+	gcUnreferencedBlobs,
+	putImageBlob,
+	resolveImageReference,
+	sessionScanRoots,
+} from "./src/blob-store.ts";
 import {
 	loadImageContentFromPath,
 	readImageContentFromPathAsync,
@@ -20,11 +30,30 @@ const buildPreviewThumbnail: ImageResizer = (image) =>
 const shrinkAttachmentForSubmission: ImageResizer = (image) =>
 	resizeForSubmission(image, { resizeImage });
 
+
+async function persistImage(image: Parameters<typeof putImageBlob>[0]): Promise<string> {
+	return (await putImageBlob(image)).reference;
+}
+
+function resolvePersistedImage(reference: string): string | undefined {
+	if (!getCapabilities().hyperlinks) return undefined;
+	const filePath = resolveImageReference(reference);
+	return filePath && existsSync(filePath) ? filePath : undefined;
+}
+
+async function collectImageGarbage(sessionDir: string): Promise<void> {
+	const references = await collectReferencedBlobNames(sessionScanRoots(sessionDir));
+	await gcUnreferencedBlobs(defaultBlobRoot(), references);
+}
+
 export default function (pi: any): void {
 	registerImagePreviewExtension(pi, {
 		readImageContentFromPathAsync,
 		maybeResizeImage: buildPreviewThumbnail,
 		resizeForSubmission: shrinkAttachmentForSubmission,
+		storeImage: persistImage,
+		resolveImageReference: resolvePersistedImage,
+		collectGarbage: collectImageGarbage,
 		loadImageContentFromPath: (filePath) => loadImageContentFromPath(filePath),
 	});
 }
