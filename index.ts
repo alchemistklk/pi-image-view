@@ -3,12 +3,9 @@ import { pathToFileURL } from "node:url";
 import { convertToPng, resizeImage } from "@earendil-works/pi-coding-agent";
 import { getCapabilities } from "@earendil-works/pi-tui";
 import {
-	collectReferencedBlobNames,
 	defaultBlobRoot,
-	gcUnreferencedBlobs,
 	putImageBlob,
 	resolveImageReference,
-	sessionScanRoots,
 } from "./src/blob-store.ts";
 import {
 	loadImageContentFromPath,
@@ -47,10 +44,6 @@ function resolvePersistedImage(reference: string): string | undefined {
 	return filePath && existsSync(filePath) ? filePath : undefined;
 }
 
-async function collectImageGarbage(sessionDir: string): Promise<void> {
-	const references = await collectReferencedBlobNames(sessionScanRoots(sessionDir));
-	await gcUnreferencedBlobs(defaultBlobRoot(), references);
-}
 
 export default function (pi: any): void {
 	registerImagePreviewExtension(pi, {
@@ -59,7 +52,6 @@ export default function (pi: any): void {
 		resizeForSubmission: shrinkAttachmentForSubmission,
 		storeImage: persistImage,
 		resolveImageReference: resolvePersistedImage,
-		collectGarbage: collectImageGarbage,
 		loadImageContentFromPath: (filePath) => loadImageContentFromPath(filePath),
 	});
 }

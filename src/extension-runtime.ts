@@ -35,7 +35,6 @@ export type ExtensionDeps = {
 	resizeForSubmission?: (image: ImageContent) => Promise<ImageContent>;
 	storeImage?: (image: ImageContent) => Promise<string | undefined>;
 	resolveImageReference?: (reference: string) => string | undefined;
-	collectGarbage?: (sessionDir: string) => Promise<unknown>;
 };
 
 type PiLike = {
@@ -280,12 +279,6 @@ export function registerImagePreviewExtension(
 		latestCtx = ctx;
 		resetDraft(ctx);
 		startPolling();
-		const sessionDir = ctx.sessionManager?.getSessionDir();
-		if (sessionDir && deps.collectGarbage) {
-			void deps.collectGarbage(sessionDir).catch((error) => {
-				debugLog("Failed to collect unreferenced image blobs", error);
-			});
-		}
 	});
 
 	pi.on("session_switch", async (_event: unknown, ctx: CtxLike) => {

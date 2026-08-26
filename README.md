@@ -19,7 +19,6 @@ The reference remains in conversation history and is clickable. The image itself
 - Stores images in a content-addressed SHA-256 blob store
 - Deduplicates identical image content
 - Removes internal blob targets from model-facing context
-- Cleans up only blobs no longer referenced by any Pi session
 - Handles immediate submit before the editor polling cycle runs
 - Supports multiple images and removal by deleting a placeholder
 - Shows inline draft thumbnails in Kitty-compatible terminals
@@ -58,12 +57,7 @@ The original `/var/folders/...` clipboard path is neither persisted in message t
 
 ## Blob lifecycle
 
-Blob cleanup is reference-driven rather than age-driven. At session startup, the extension scans Pi session JSONL files and deletes image blobs that:
-
-- are not referenced by any session, and
-- are older than a five-minute write-safety grace period.
-
-Referenced images remain available so old conversation links do not expire unexpectedly. Identical images share one blob.
+Identical images share one content-addressed blob. Automatic deletion is currently disabled: a Pi process can use a custom or temporary session directory, so scanning only that directory is not sufficient evidence that a globally stored blob is unreferenced. Until cleanup can coordinate across every configured session root and active process, preserving referenced history links takes priority over reclaiming disk space.
 
 ## Terminal support
 
