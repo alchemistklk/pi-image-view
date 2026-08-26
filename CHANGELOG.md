@@ -3,6 +3,24 @@
 All notable changes to `pi-image-view` are documented here. This project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.2.1 — unreleased
+
+Documentation and package metadata only. No runtime code changes.
+
+### Changed
+
+- The README opens with the before/after the extension exists for, states when to
+  use it, front-loads command/key/limit reference tables, and phrases
+  troubleshooting entries as the symptom rather than the mechanism.
+- The npm `description` states the job and carries the terms people search with
+  (screenshot, clipboard, paste) instead of describing the mechanism.
+- `keywords` expanded from 8 to 23. `pi-package` is retained — the pi.dev gallery
+  indexes on it.
+- `CHANGELOG.md` ships in the npm tarball.
+
+`0.2.0` was published with the previous description and keywords, and npm does not
+allow republishing a version, so this patch release exists to correct the listing.
+
 ## 0.2.0 — 2026-08-26
 
 Direct clipboard paste, atomic `[Image #N]` markers, and a one-shot detail mode.

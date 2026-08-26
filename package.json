@@ -1,6 +1,6 @@
 {
   "name": "pi-image-view",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Paste screenshots into the Pi coding agent without pasting file paths — stable [Image #N] references, clickable history, and compact 480px model thumbnails",
   "keywords": [
     "pi-package",
