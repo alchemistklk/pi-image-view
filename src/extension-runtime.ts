@@ -17,8 +17,9 @@ type TrackedImage = {
 	placeholder: string;
 	/** Full-resolution image attached to the submitted message. */
 	image: ImageContent;
-	/** Small PNG thumbnail used only for the inline gallery preview. */
+	/** Small PNG thumbnail used for both inline preview and model submission. */
 	previewImage?: ImageContent;
+	previewPromise?: Promise<ImageContent>;
 	label: string;
 };
 
@@ -120,6 +121,25 @@ export function registerImagePreviewExtension(
 
 	// ── Helpers ────────────────────────────────────────────
 
+
+	function ensurePreview(entry: TrackedImage): Promise<ImageContent> {
+		if (entry.previewImage) return Promise.resolve(entry.previewImage);
+		if (!deps.maybeResizeImage) return Promise.resolve(entry.image);
+		if (!entry.previewPromise) {
+			entry.previewPromise = deps.maybeResizeImage(entry.image)
+				.then((preview) => {
+					entry.previewImage = preview;
+					if (latestCtx && tracked.get(entry.placeholder) === entry) refreshWidget(latestCtx);
+					return preview;
+				})
+				.catch((error) => {
+					debugLog(`Failed to resize image ${entry.filePath}`, error);
+					return entry.image;
+				});
+		}
+		return entry.previewPromise;
+	}
+
 	function refreshWidget(ctx: CtxLike): void {
 		if (tracked.size === 0) {
 			if (gallery) {
@@ -219,16 +239,7 @@ export function registerImagePreviewExtension(
 				renderedText = renderedText.replace(raw, placeholder);
 				changed = true;
 
-				if (deps.maybeResizeImage) {
-					void deps.maybeResizeImage(image).then((resized) => {
-						if (tracked.get(placeholder) === entry) {
-							entry.previewImage = resized;
-							if (latestCtx) refreshWidget(latestCtx);
-						}
-					}).catch((err) => {
-						debugLog(`Failed to resize image ${filePath}`, err);
-					});
-				}
+				if (deps.maybeResizeImage) void ensurePreview(entry);
 			}
 
 			if (renderedText !== text) ctx.ui.setEditorText(renderedText);
@@ -339,22 +350,41 @@ export function registerImagePreviewExtension(
 		if (candidates.length === 0) return { action: "continue" };
 		candidates.sort((a, b) => a.index - b.index);
 
-		const existingByContent = new Map<string, ImageContent[]>();
-		for (const image of event.images ?? []) {
+		const existingByContent = new Map<string, number[]>();
+		for (const [index, image] of (event.images ?? []).entries()) {
 			const key = `${image.mimeType}\u0000${image.data}`;
 			const matches = existingByContent.get(key);
-			if (matches) matches.push(image);
-			else existingByContent.set(key, [image]);
+			if (matches) matches.push(index);
+			else existingByContent.set(key, [index]);
+		}
+		const existingIndexes = candidates.map(({ entry }) => {
+			const key = `${entry.image.mimeType}\u0000${entry.image.data}`;
+			return existingByContent.get(key)?.shift();
+		});
+		const usedExistingIndexes = new Set(
+			existingIndexes.filter((index): index is number => index !== undefined),
+		);
+		const unmatchedCandidates = existingIndexes
+			.map((index, candidateIndex) => index === undefined ? candidateIndex : undefined)
+			.filter((index): index is number => index !== undefined);
+		const unmatchedExisting = (event.images ?? [])
+			.map((_image, index) => usedExistingIndexes.has(index) ? undefined : index)
+			.filter((index): index is number => index !== undefined);
+		// Pi may auto-resize @file inputs before the extension sees event.images,
+		// so their bytes no longer match the original path. Equal remaining counts
+		// preserve Pi's file-argument order without duplicating those attachments.
+		if (unmatchedCandidates.length === unmatchedExisting.length) {
+			for (let index = 0; index < unmatchedCandidates.length; index += 1) {
+				existingIndexes[unmatchedCandidates[index]!] = unmatchedExisting[index];
+			}
 		}
 		const preparedImages = await Promise.all(
-			candidates.map(async ({ entry }) => {
-				const key = `${entry.image.mimeType}\u0000${entry.image.data}`;
-				const existing = existingByContent.get(key)?.shift();
-				if (existing) return { image: existing, append: false };
+			candidates.map(async ({ entry }, candidateIndex) => {
+				const preview = await ensurePreview(entry);
 				const image = deps.resizeForSubmission
-					? await deps.resizeForSubmission(entry.image)
-					: entry.image;
-				return { image, append: true };
+					? await deps.resizeForSubmission(preview)
+					: preview;
+				return { image, existingIndex: existingIndexes[candidateIndex] };
 			}),
 		);
 		const references = await Promise.all(
@@ -377,10 +407,11 @@ export function registerImagePreviewExtension(
 				: candidate.entry.placeholder;
 			transformedText = transformedText.replace(candidate.token, marker);
 		}
-		const images = [
-			...(event.images ?? []),
-			...preparedImages.filter(({ append }) => append).map(({ image }) => image),
-		];
+		const images = [...(event.images ?? [])];
+		for (const { image, existingIndex } of preparedImages) {
+			if (existingIndex === undefined) images.push(image);
+			else images[existingIndex] = image;
+		}
 		resetDraft(ctx);
 		return { action: "transform", text: transformedText, images };
 	});

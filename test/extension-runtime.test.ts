@@ -43,6 +43,11 @@ describe("submit attachment resizing", () => {
 				data: "RAW",
 				mimeType: "image/png",
 			};
+			const previewImage = {
+				type: "image" as const,
+				data: "PREVIEW",
+				mimeType: "image/png",
+			};
 			const resizedImage = {
 				type: "image" as const,
 				data: "SMALL",
@@ -52,6 +57,7 @@ describe("submit attachment resizing", () => {
 			const deps = {
 				readImageContentFromPathAsync: vi.fn(async () => rawImage),
 				loadImageContentFromPath: vi.fn(async () => null),
+				maybeResizeImage: vi.fn(async () => previewImage),
 				resizeForSubmission,
 			};
 			const { handlers, ctx } = makeHarness(deps);
@@ -67,7 +73,7 @@ describe("submit attachment resizing", () => {
 
 			expect(result.action).toBe("transform");
 			expect(result.images).toEqual([resizedImage]);
-			expect(resizeForSubmission).toHaveBeenCalledWith(rawImage);
+			expect(resizeForSubmission).toHaveBeenCalledWith(previewImage);
 		} finally {
 			vi.useRealTimers();
 		}
@@ -117,11 +123,8 @@ describe("submit attachment resizing", () => {
 		await new Promise((r) => setTimeout(r, 300));
 
 		const submit = handlers.get("input")!({ text, images: [] }, ctx);
-		await Promise.resolve();
-		await Promise.resolve();
-
 		// Both resizes must start even while the first is still pending.
-		expect(started.length === 2).toBe(true);
+		await vi.waitFor(() => expect(started).toHaveLength(2));
 
 		releaseA();
 		const result = await submit;
@@ -209,9 +212,11 @@ describe("compact editor attachments", () => {
 			data: "FAST",
 			mimeType: "image/png",
 		};
+		const preview = { ...image, data: "FAST_PREVIEW" };
 		const deps = {
 			readImageContentFromPathAsync: vi.fn(async () => image),
 			loadImageContentFromPath: vi.fn(async () => null),
+			maybeResizeImage: vi.fn(async () => preview),
 			storeImage: vi.fn(async () => "file:///tmp/image-view/blobs/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png"),
 		};
 		const { handlers, ctx } = makeHarness(deps);
@@ -224,37 +229,39 @@ describe("compact editor attachments", () => {
 		expect(result).toEqual({
 			action: "transform",
 			text: "[[Image #1]](file:///tmp/image-view/blobs/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png) explain this",
-			images: [image],
+			images: [preview],
 		});
 	});
 
 
-	it("does not append a path image already present in event.images", async () => {
+	it("replaces a Pi-resized event image with one path thumbnail", async () => {
 		const image = {
 			type: "image" as const,
 			data: "SAME_IMAGE",
 			mimeType: "image/png",
 		};
+		const eventImage = { ...image, data: "CORE_RESIZED" };
 		const ref = `file:///tmp/image-view/blobs/${"a".repeat(64)}.png`;
 		const deps = {
 			readImageContentFromPathAsync: vi.fn(async () => image),
 			loadImageContentFromPath: vi.fn(async () => null),
+			maybeResizeImage: vi.fn(async () => ({ ...image, data: "THUMB" })),
 			storeImage: vi.fn(async () => ref),
 			resizeForSubmission: vi.fn(async (candidate: typeof image) => candidate),
 		};
 		const { handlers, ctx } = makeHarness(deps);
 
 		const result = await handlers.get("input")!(
-			{ text: "/tmp/already-attached.png describe it", images: [image] },
+			{ text: "/tmp/already-attached.png describe it", images: [eventImage] },
 			ctx,
 		);
 
 		expect(result).toEqual({
 			action: "transform",
 			text: `[[Image #1]](${ref}) describe it`,
-			images: [image],
+			images: [{ ...image, data: "THUMB" }],
 		});
-		expect(deps.resizeForSubmission).not.toHaveBeenCalled();
+		expect(deps.resizeForSubmission).toHaveBeenCalledWith({ ...image, data: "THUMB" });
 	});
 
 	it("does not submit an attachment after its placeholder is deleted", async () => {
