@@ -1,9 +1,13 @@
-import { spawnSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync, unlinkSync } from "node:fs";
+import { existsSync } from "node:fs";
+import { readFile, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import type { ImageContent } from "./content.ts";
+
+const execFileAsync = promisify(execFile);
 
 export type ClipboardPayload =
 	| { kind: "image"; image: ImageContent }
@@ -14,29 +18,28 @@ export function supportsDirectClipboard(env: NodeJS.ProcessEnv = process.env, pl
 	return platform === "darwin" || platform === "win32" || Boolean(env.WSL_DISTRO_NAME || env.WSL_INTEROP);
 }
 
-function macImage(): ImageContent | undefined {
+async function macImage(): Promise<ImageContent | undefined> {
 	for (const [clipboardClass, extension, mimeType] of [
 		["PNGf", "png", "image/png"],
 		["JPEG", "jpg", "image/jpeg"],
 	] as const) {
 		const file = join(tmpdir(), `pi-image-view-clipboard-${randomUUID()}.${extension}`);
 		try {
-			const result = spawnSync("osascript", [
+			await execFileAsync("osascript", [
 				"-e", `set imageData to the clipboard as «class ${clipboardClass}»`,
 				"-e", `set outputFile to open for access POSIX file ${JSON.stringify(file)} with write permission`,
 				"-e", "set eof of outputFile to 0",
 				"-e", "write imageData to outputFile",
 				"-e", "close access outputFile",
-			], { timeout: 3000, stdio: "ignore" });
-			if (result.status !== 0) continue;
-			const bytes = readFileSync(file);
+			], { timeout: 1500, maxBuffer: 1024 * 1024 });
+			const bytes = await readFile(file);
 			if (bytes.length > 0 && bytes.length <= 50 * 1024 * 1024) {
 				return { type: "image", data: bytes.toString("base64"), mimeType };
 			}
 		} catch {
 			// Try the next format, then text.
 		} finally {
-			try { unlinkSync(file); } catch { /* best effort */ }
+			try { await unlink(file); } catch { /* best effort */ }
 		}
 	}
 	return undefined;
@@ -51,7 +54,7 @@ function powershellExecutable(platform: NodeJS.Platform): string {
 	return "powershell.exe";
 }
 
-function windowsImage(platform: NodeJS.Platform): ImageContent | undefined {
+async function windowsImage(platform: NodeJS.Platform): Promise<ImageContent | undefined> {
 	const script = [
 		"$ErrorActionPreference = 'Stop'",
 		"Add-Type -AssemblyName System.Windows.Forms | Out-Null",
@@ -63,11 +66,10 @@ function windowsImage(platform: NodeJS.Platform): ImageContent | undefined {
 		"[Console]::Out.Write([Convert]::ToBase64String($ms.ToArray()))",
 	].join("; ");
 	try {
-		const result = spawnSync(powershellExecutable(platform), ["-NoProfile", "-NonInteractive", "-STA", "-Command", script], {
-			timeout: 5000, encoding: "utf8", maxBuffer: 70 * 1024 * 1024,
+		const { stdout } = await execFileAsync(powershellExecutable(platform), ["-NoProfile", "-NonInteractive", "-STA", "-Command", script], {
+			timeout: 2500, encoding: "utf8", maxBuffer: 70 * 1024 * 1024,
 		});
-		if (result.status !== 0) return undefined;
-		const data = (result.stdout || "").trim();
+		const data = stdout.trim();
 		const bytes = Buffer.from(data, "base64");
 		return bytes.length > 0 && bytes.length <= 50 * 1024 * 1024
 			? { type: "image", data, mimeType: "image/png" }
@@ -75,22 +77,22 @@ function windowsImage(platform: NodeJS.Platform): ImageContent | undefined {
 	} catch { return undefined; }
 }
 
-function clipboardText(platform: NodeJS.Platform): string | undefined {
+async function clipboardText(platform: NodeJS.Platform): Promise<string | undefined> {
 	try {
-		const result = platform === "darwin"
-			? spawnSync("pbpaste", [], { timeout: 3000, encoding: "utf8", maxBuffer: 10 * 1024 * 1024 })
-			: spawnSync(powershellExecutable(platform), ["-NoProfile", "-NonInteractive", "-Command", "[Console]::Out.Write((Get-Clipboard -Raw))"], { timeout: 5000, encoding: "utf8", maxBuffer: 10 * 1024 * 1024 });
-		return result.status === 0 && result.stdout ? result.stdout : undefined;
+		const { stdout } = platform === "darwin"
+			? await execFileAsync("pbpaste", [], { timeout: 1500, encoding: "utf8", maxBuffer: 10 * 1024 * 1024 })
+			: await execFileAsync(powershellExecutable(platform), ["-NoProfile", "-NonInteractive", "-Command", "[Console]::Out.Write((Get-Clipboard -Raw))"], { timeout: 2500, encoding: "utf8", maxBuffer: 10 * 1024 * 1024 });
+		return stdout || undefined;
 	} catch { return undefined; }
 }
 
-export function readDirectClipboard(
+export async function readDirectClipboard(
 	env: NodeJS.ProcessEnv = process.env,
 	platform: NodeJS.Platform = process.platform,
-): ClipboardPayload {
+): Promise<ClipboardPayload> {
 	if (!supportsDirectClipboard(env, platform)) return { kind: "empty" };
-	const image = platform === "darwin" ? macImage() : windowsImage(platform);
+	const image = platform === "darwin" ? await macImage() : await windowsImage(platform);
 	if (image) return { kind: "image", image };
-	const text = clipboardText(platform);
+	const text = await clipboardText(platform);
 	return text ? { kind: "text", text } : { kind: "empty" };
 }

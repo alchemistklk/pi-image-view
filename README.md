@@ -125,7 +125,7 @@ Both extensions still represent N images as N `ImageContent` blocks until Pi com
 
 For v0.2.0:
 
-- 47 automated tests pass across 10 files.
+- 59 automated tests pass across 12 files.
 - Production dependency audit reports 0 vulnerabilities.
 - `npm pack --dry-run` and `npm publish --dry-run` pass.
 - An isolated Pi load probe succeeds.
@@ -135,6 +135,10 @@ For v0.2.0:
 On macOS, Windows, and WSL, `pi-image-view` automatically enables its editor. It reads image clipboard data itself and inserts `[Image #N]` directly, so Pi never renders a temporary clipboard path. Left/right navigation jumps across the whole marker, and Backspace/Delete removes it in one undoable action. Clipboard text still pastes as text.
 
 Native Linux automatically keeps Pi's default editor and uses paste-triggered burst scans because direct clipboard image reading is not yet available there. No environment-variable or wrapper configuration is required.
+
+## Editor compatibility
+
+Compatibility with `pi-zentui` is tracked in [Issue #1](https://github.com/alchemistklk/pi-image-view/issues/1) and is not considered fully fixed. The current tested workaround is to load `pi-image-view` before `pi-zentui`, allowing Zentui to wrap the image-view editor. The reverse order may cause editor/status reconciliation instability.
 
 ## Terminal support
 

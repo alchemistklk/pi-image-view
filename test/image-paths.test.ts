@@ -74,4 +74,26 @@ it("accepts common punctuation immediately after unquoted paths", () => {
 	]);
 });
 
+
+it("expands home-relative and resolves cwd-relative paths", () => {
+	expect(extractImagePaths("~/shot.png ./nested/a.jpg ../up/b.webp", {
+		home: "/Users/test",
+		cwd: "/work/project",
+	})).toEqual([
+		{ raw: "~/shot.png", path: "/Users/test/shot.png" },
+		{ raw: "./nested/a.jpg", path: "/work/project/nested/a.jpg" },
+		{ raw: "../up/b.webp", path: "/work/up/b.webp" },
+	]);
+});
+
+it("resolves shell escapes before expanding home- and cwd-relative prefixes", () => {
+	expect(extractImagePaths("~/My\\ Photo.png ./sub\\ dir/b.jpg", {
+		home: "/Users/test",
+		cwd: "/work/project",
+	})).toEqual([
+		{ raw: "~/My\\ Photo.png", path: "/Users/test/My Photo.png" },
+		{ raw: "./sub\\ dir/b.jpg", path: "/work/project/sub dir/b.jpg" },
+	]);
+});
+
 });

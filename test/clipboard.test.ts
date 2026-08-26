@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { supportsDirectClipboard } from "../src/clipboard.ts";
+import { readDirectClipboard, supportsDirectClipboard } from "../src/clipboard.ts";
 
 describe("direct clipboard platform support", () => {
 	it("enables direct image paste on macOS, Windows, and WSL", () => {
@@ -8,7 +8,8 @@ describe("direct clipboard platform support", () => {
 		expect(supportsDirectClipboard({ WSL_DISTRO_NAME: "Ubuntu" }, "linux")).toBe(true);
 	});
 
-	it("keeps native Linux on Pi's built-in paste plus burst scans", () => {
+	it("keeps native Linux on Pi's built-in paste plus burst scans", async () => {
 		expect(supportsDirectClipboard({}, "linux")).toBe(false);
+		await expect(readDirectClipboard({}, "linux")).resolves.toEqual({ kind: "empty" });
 	});
 });

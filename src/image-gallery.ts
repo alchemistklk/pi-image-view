@@ -266,7 +266,8 @@ export class ImageGallery implements Component {
 				: ` 📎 ${count} images attached`;
 		lines.push(this.theme.accent(headerText));
 
-		if (imageProtocol === "kitty") {
+		const allPng = this.images.every((image) => image.mimeType === "image/png");
+		if (imageProtocol === "kitty" && allPng) {
 			this.renderKittyHorizontal(lines, width);
 		} else {
 			this.renderTextFallback(lines);

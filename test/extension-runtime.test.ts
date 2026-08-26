@@ -15,6 +15,7 @@ function makeHarness(deps: any) {
 	const handlers = new Map<string, Handler>();
 	const commands = new Map<string, { handler: (args: string, ctx: any) => void }>();
 	let terminalInputHandler: ((data: string) => unknown) | undefined;
+	let activeEditorFactory: ((...args: any[]) => unknown) | undefined;
 	let markdownTransformer: ((markdown: string, context: { messageType: string }) => string) | undefined;
 	const pi = {
 		on: (event: string, handler: Handler) => handlers.set(event, handler),
@@ -28,8 +29,9 @@ function makeHarness(deps: any) {
 		hasUI: true,
 		isIdle: () => true,
 		ui: {
+			getEditorComponent: vi.fn(() => activeEditorFactory),
 			onTerminalInput: vi.fn((handler: (data: string) => unknown) => { terminalInputHandler = handler; return vi.fn(); }),
-			setEditorComponent: vi.fn(),
+			setEditorComponent: vi.fn((factory: ((...args: any[]) => unknown) | undefined) => { activeEditorFactory = factory; }),
 			notify: vi.fn(),
 			setWidget: vi.fn(),
 			getEditorText: vi.fn(() => ""),
@@ -381,6 +383,41 @@ describe("draft scan lifecycle", () => {
 		} finally {
 			vi.useRealTimers();
 		}
+	});
+
+
+	it("does not clear an editor factory installed by another extension", async () => {
+		const createAtomicEditor = vi.fn(() => ({ kind: "atomic" }));
+		const { handlers, ctx } = makeHarness({
+			readImageContentFromPathAsync: vi.fn(async () => null),
+			loadImageContentFromPath: vi.fn(async () => null),
+			createAtomicEditor,
+		});
+		await handlers.get("session_start")!(undefined, ctx);
+		const otherFactory = vi.fn();
+		ctx.ui.setEditorComponent(otherFactory);
+
+		await handlers.get("session_shutdown")!(undefined, ctx);
+
+		expect(ctx.ui.getEditorComponent()).toBe(otherFactory);
+	});
+
+	it("restores the factory it displaced when it still owns the editor", async () => {
+		const createAtomicEditor = vi.fn(() => ({ kind: "atomic" }));
+		const { handlers, ctx } = makeHarness({
+			readImageContentFromPathAsync: vi.fn(async () => null),
+			loadImageContentFromPath: vi.fn(async () => null),
+			createAtomicEditor,
+		});
+		const priorFactory = vi.fn();
+		ctx.ui.setEditorComponent(priorFactory);
+
+		await handlers.get("session_start")!(undefined, ctx);
+		expect(ctx.ui.getEditorComponent()).not.toBe(priorFactory);
+
+		await handlers.get("session_shutdown")!(undefined, ctx);
+
+		expect(ctx.ui.getEditorComponent()).toBe(priorFactory);
 	});
 
 	it("polls only with UI and cleans up on session shutdown", async () => {
