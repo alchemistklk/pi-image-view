@@ -22,6 +22,7 @@ function makeHarness(deps: any) {
 	};
 	const ctx = {
 		cwd: "/tmp",
+		hasUI: true,
 		isIdle: () => true,
 		ui: {
 			setWidget: vi.fn(),
@@ -113,6 +114,7 @@ describe("compact editor attachments", () => {
 			readImageContentFromPathAsync: vi.fn(async () => image),
 			loadImageContentFromPath: vi.fn(async () => null),
 			maybeResizeImage: vi.fn(async () => ({ ...image, data: "THUMB" })),
+			normalizeImageForMatching: vi.fn(async () => eventImage),
 			storeImage: vi.fn(async () => ref),
 		};
 		const { handlers, ctx } = makeHarness(deps);
@@ -127,6 +129,50 @@ describe("compact editor attachments", () => {
 			text: `[[Image #1]](${ref}) describe it`,
 			images: [{ ...image, data: "THUMB" }],
 		});
+	});
+
+
+	it("preserves an unrelated event image when a raw path candidate is different", async () => {
+		const eventImage = { type: "image" as const, data: "EVENT", mimeType: "image/png" };
+		const pathImage = { type: "image" as const, data: "PATH", mimeType: "image/png" };
+		const preview = { ...pathImage, data: "THUMB" };
+		const deps = {
+			readImageContentFromPathAsync: vi.fn(async () => pathImage),
+			loadImageContentFromPath: vi.fn(async () => null),
+			maybeResizeImage: vi.fn(async () => preview),
+		};
+		const { handlers, ctx } = makeHarness(deps);
+
+		const result = await handlers.get("input")!(
+			{ text: "/tmp/path.png compare", images: [eventImage] },
+			ctx,
+		);
+
+		expect(result.images).toEqual([eventImage, preview]);
+	});
+
+	it("retries unchanged editor text after a transient image-read failure", async () => {
+		vi.useFakeTimers();
+		try {
+			const image = { type: "image" as const, data: "RECOVERED", mimeType: "image/png" };
+			const readImage = vi.fn()
+				.mockResolvedValueOnce(null)
+				.mockResolvedValue(image);
+			const deps = {
+				readImageContentFromPathAsync: readImage,
+				loadImageContentFromPath: vi.fn(async () => null),
+			};
+			const { handlers, ctx } = makeHarness(deps);
+			ctx.ui.getEditorText = vi.fn(() => "/tmp/retry.png");
+
+			await handlers.get("session_start")!(undefined, ctx);
+			await vi.advanceTimersByTimeAsync(600);
+
+			expect(readImage).toHaveBeenCalledTimes(2);
+			expect(ctx.ui.setEditorText).toHaveBeenCalledWith("[Image #1]");
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it("does not submit an attachment after its placeholder is deleted", async () => {
@@ -197,7 +243,7 @@ describe("draft scan lifecycle", () => {
 		}
 	});
 
-	it("does not rescan unchanged editor text", async () => {
+	it("bounds retries for unchanged unreadable image paths", async () => {
 		vi.useFakeTimers();
 		try {
 			const read = vi.fn(async () => null);
@@ -210,7 +256,7 @@ describe("draft scan lifecycle", () => {
 			await handlers.get("session_start")!(undefined, ctx);
 			await vi.advanceTimersByTimeAsync(1_000);
 
-			expect(read).toHaveBeenCalledTimes(1);
+			expect(read).toHaveBeenCalledTimes(3);
 			await handlers.get("session_shutdown")!(undefined, ctx);
 		} finally {
 			vi.useRealTimers();

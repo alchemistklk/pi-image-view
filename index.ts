@@ -3,7 +3,6 @@ import { pathToFileURL } from "node:url";
 import { convertToPng, resizeImage } from "@earendil-works/pi-coding-agent";
 import { getCapabilities } from "@earendil-works/pi-tui";
 import {
-	defaultBlobRoot,
 	putImageBlob,
 	resolveImageReference,
 } from "./src/blob-store.ts";
@@ -21,6 +20,17 @@ import { resizeForPreview } from "./src/preview-resize.ts";
 // running agent's implementation (no fragile filesystem lookup needed).
 const buildPreviewThumbnail: ImageResizer = (image) =>
 	resizeForPreview(image, { resizeImage, convertToPng });
+
+const normalizeImageForMatching: ImageResizer = async (image) => {
+	try {
+		const normalized = await resizeImage(Buffer.from(image.data, "base64"), image.mimeType);
+		return normalized
+			? { type: "image", data: normalized.data, mimeType: normalized.mimeType }
+			: image;
+	} catch {
+		return image;
+	}
+};
 
 
 async function persistImage(image: Parameters<typeof putImageBlob>[0]): Promise<string> {
@@ -43,6 +53,7 @@ export default function (pi: any): void {
 	registerImagePreviewExtension(pi, {
 		readImageContentFromPathAsync,
 		maybeResizeImage: buildPreviewThumbnail,
+		normalizeImageForMatching,
 		storeImage: persistImage,
 		resolveImageReference: resolvePersistedImage,
 		loadImageContentFromPath: (filePath) => loadImageContentFromPath(filePath),

@@ -16,13 +16,13 @@ The reference remains in conversation history and is clickable. The image itself
 - Replaces pasted and dragged image paths with `[Image #N]`
 - Keeps `[Image #N]` in new and restored conversation history
 - Makes historical references clickable through terminal OSC 8 links
-- Stores submitted 480px PNG thumbnails in a content-addressed SHA-256 blob store
+- Stores submitted model images in a content-addressed SHA-256 blob store (normally 480px PNG thumbnails)
 - Deduplicates identical image content
 - Removes internal blob targets from model-facing context
 - Provides session-scoped control over which image attachments reach the model
 - Handles immediate submit before the editor polling cycle runs
 - Supports multiple images and removal by deleting a placeholder
-- Uses the same 480px PNG thumbnail for inline preview and model submission
+- Uses the same best-effort 480px PNG thumbnail for inline preview and model submission
 - Supports tmux through Kitty's Unicode placeholder protocol
 
 ## Install
@@ -43,7 +43,7 @@ Then paste an image with `Ctrl+V` (`Alt+V` on Windows/WSL). If Pi is already run
 
 1. Pi writes a pasted image to a temporary path.
 2. The extension loads it and replaces the editor path with `[Image #N]`.
-3. The extension awaits the 480px PNG preview, submits that thumbnail to the model, and writes the same bytes to:
+3. The extension awaits a best-effort 480px PNG preview, submits that model image, and writes the same bytes to:
 
    ```text
    ~/.pi/agent/image-view/blobs/<sha256>.<ext>
@@ -53,7 +53,7 @@ Then paste an image with `Ctrl+V` (`Alt+V` on Windows/WSL). If Pi is already run
 5. Before each model call, a context hook removes the local target, leaving the model only `[Image #N]` plus the image attachment.
 6. A display-only Markdown transformer keeps compatibility with pre-release `image-view://` references.
 
-The original `/var/folders/...` clipboard path and full-resolution bytes are neither persisted in message text nor sent to the model. The persistent blob contains the submitted thumbnail; its local path is stored only as history display metadata and is stripped from model-facing context.
+The original `/var/folders/...` clipboard path is never sent to the model. Normally the submitted bytes are a 480px PNG thumbnail. If Pi cannot resize or convert the image, the extension fails open to the source image so the attachment is not lost; the persistent blob then contains that submitted fallback. The local blob path is stored only as history display metadata and is stripped from model-facing context.
 
 ## Model image context
 

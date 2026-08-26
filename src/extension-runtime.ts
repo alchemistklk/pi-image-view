@@ -29,6 +29,7 @@ export type ExtensionDeps = {
 		filePath: string,
 	) => Promise<ImageContent | null>;
 	maybeResizeImage?: (image: ImageContent) => Promise<ImageContent>;
+	normalizeImageForMatching?: (image: ImageContent) => Promise<ImageContent>;
 	loadImageContentFromPath: (
 		filePath: string,
 	) => Promise<ImageContent | null>;
@@ -140,6 +141,8 @@ export function registerImagePreviewExtension(
 	let scanInFlight = false;
 	let scanGeneration = 0;
 	let lastScannedText: string | undefined;
+	let failedScanText: string | undefined;
+	let failedScanAttempts = 0;
 
 	// ── Helpers ────────────────────────────────────────────
 
@@ -214,6 +217,8 @@ export function registerImagePreviewExtension(
 		nextPlaceholderNumber = 1;
 		scanGeneration += 1;
 		lastScannedText = undefined;
+		failedScanText = undefined;
+		failedScanAttempts = 0;
 		ctx.ui.setWidget(WIDGET_KEY, undefined);
 	}
 
@@ -231,6 +236,10 @@ export function registerImagePreviewExtension(
 			return;
 		}
 		if (text === lastScannedText) return;
+		if (text !== failedScanText) {
+			failedScanText = text;
+			failedScanAttempts = 0;
+		}
 		lastScannedText = text;
 		const generation = ++scanGeneration;
 		if (scanInFlight) return;
@@ -248,6 +257,7 @@ export function registerImagePreviewExtension(
 			}
 
 			let renderedText = text;
+			let hadReadFailure = false;
 			const newEntries: TrackedImage[] = [];
 			for (const { raw, path: filePath } of extractImagePaths(text)) {
 				const image = await deps.readImageContentFromPathAsync(filePath);
@@ -255,7 +265,10 @@ export function registerImagePreviewExtension(
 					lastScannedText = undefined;
 					return;
 				}
-				if (!image) continue;
+				if (!image) {
+					hadReadFailure = true;
+					continue;
+				}
 
 				let placeholder: string;
 				do {
@@ -286,6 +299,13 @@ export function registerImagePreviewExtension(
 			if (changed) refreshWidget(ctx);
 			for (const entry of newEntries) {
 				if (deps.maybeResizeImage) void ensurePreview(entry);
+			}
+			if (hadReadFailure) {
+				failedScanAttempts += 1;
+				if (failedScanAttempts < 3) lastScannedText = undefined;
+			} else {
+				failedScanText = undefined;
+				failedScanAttempts = 0;
 			}
 		} finally {
 			scanInFlight = false;
@@ -402,21 +422,12 @@ export function registerImagePreviewExtension(
 			const key = `${entry.image.mimeType}\u0000${entry.image.data}`;
 			return existingByContent.get(key)?.shift();
 		});
-		const usedExistingIndexes = new Set(
-			existingIndexes.filter((index): index is number => index !== undefined),
-		);
-		const unmatchedCandidates = existingIndexes
-			.map((index, candidateIndex) => index === undefined ? candidateIndex : undefined)
-			.filter((index): index is number => index !== undefined);
-		const unmatchedExisting = (event.images ?? [])
-			.map((_image, index) => usedExistingIndexes.has(index) ? undefined : index)
-			.filter((index): index is number => index !== undefined);
-		// Pi may auto-resize @file inputs before the extension sees event.images,
-		// so their bytes no longer match the original path. Equal remaining counts
-		// preserve Pi's file-argument order without duplicating those attachments.
-		if (unmatchedCandidates.length === unmatchedExisting.length) {
-			for (let index = 0; index < unmatchedCandidates.length; index += 1) {
-				existingIndexes[unmatchedCandidates[index]!] = unmatchedExisting[index];
+		if (deps.normalizeImageForMatching) {
+			for (let candidateIndex = 0; candidateIndex < candidates.length; candidateIndex += 1) {
+				if (existingIndexes[candidateIndex] !== undefined) continue;
+				const normalized = await deps.normalizeImageForMatching(candidates[candidateIndex]!.entry.image);
+				const key = `${normalized.mimeType}\u0000${normalized.data}`;
+				existingIndexes[candidateIndex] = existingByContent.get(key)?.shift();
 			}
 		}
 		const preparedImages = await Promise.all(
