@@ -4,6 +4,7 @@ import {
 	createImageMarkerLink,
 	renderImageMarkerLinks,
 	sanitizeModelMessages,
+	type ImageContextMode,
 } from "./attachment-links.ts";
 import { ImageGallery, type GalleryImage } from "./image-gallery.ts";
 import { extractImagePaths } from "./image-paths.ts";
@@ -59,6 +60,7 @@ type CtxLike = {
 		): void;
 		getEditorText(): string;
 		setEditorText(text: string): void;
+		notify(message: string, type?: "info" | "warning" | "error"): void;
 		theme: any;
 	};
 };
@@ -107,8 +109,27 @@ export function registerImagePreviewExtension(
 		);
 	}
 
-	pi.on("context", (event: { messages: Array<{ content?: unknown }> }) => ({
-		messages: sanitizeModelMessages(event.messages),
+	let contextMode: ImageContextMode = "all";
+
+	pi.registerCommand?.("image-view-context", {
+		description: "Control which images are included in model context (all, latest, none)",
+		handler: (args, ctx) => {
+			const requested = args.trim();
+			if (requested === "" || requested === "status") {
+				ctx.ui.notify(`Image context mode: ${contextMode}`, "info");
+				return;
+			}
+			if (requested !== "all" && requested !== "latest" && requested !== "none") {
+				ctx.ui.notify("Usage: /image-view-context [status|all|latest|none]", "error");
+				return;
+			}
+			contextMode = requested;
+			ctx.ui.notify(`Image context mode: ${contextMode}`, "info");
+		},
+	});
+
+	pi.on("context", (event: { messages: Array<{ role?: unknown; content?: unknown }> }) => ({
+		messages: sanitizeModelMessages(event.messages, contextMode),
 	}));
 
 	let tracked: Map<string, TrackedImage> = new Map();
@@ -308,6 +329,7 @@ export function registerImagePreviewExtension(
 	};
 
 	pi.on("session_start", async (_event: unknown, ctx: CtxLike) => {
+		contextMode = "all";
 		latestCtx = ctx;
 		resetDraft(ctx);
 		if (ctx.hasUI !== false && ctx.mode !== "print" && ctx.mode !== "json") {

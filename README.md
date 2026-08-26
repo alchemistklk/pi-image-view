@@ -19,6 +19,7 @@ The reference remains in conversation history and is clickable. The image itself
 - Stores submitted 480px PNG thumbnails in a content-addressed SHA-256 blob store
 - Deduplicates identical image content
 - Removes internal blob targets from model-facing context
+- Provides session-scoped control over which image attachments reach the model
 - Handles immediate submit before the editor polling cycle runs
 - Supports multiple images and removal by deleting a placeholder
 - Uses the same 480px PNG thumbnail for inline preview and model submission
@@ -53,6 +54,21 @@ Then paste an image with `Ctrl+V` (`Alt+V` on Windows/WSL). If Pi is already run
 6. A display-only Markdown transformer keeps compatibility with pre-release `image-view://` references.
 
 The original `/var/folders/...` clipboard path and full-resolution bytes are neither persisted in message text nor sent to the model. The persistent blob contains the submitted thumbnail; its local path is stored only as history display metadata and is stripped from model-facing context.
+
+## Model image context
+
+Use `/image-view-context` to inspect or change which existing image attachments are included in model calls:
+
+```text
+/image-view-context status
+/image-view-context all
+/image-view-context latest
+/image-view-context none
+```
+
+The default is `all`. `latest` keeps images from only the newest image-bearing user turn, including tool-result images from that turn, while `none` removes every image attachment. The setting is in-memory and applies only to the current extension session; starting another session resets it to `all`.
+
+All modes strip local file and internal image-link targets before model calls. These transformations affect only the model-facing copy: session history, entries, and stored blobs remain unchanged. Image-only messages receive a short text placeholder when their attachment is omitted.
 
 ## Blob lifecycle
 
