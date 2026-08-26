@@ -159,3 +159,103 @@ describe("submit attachment resizing", () => {
 		}
 	});
 });
+
+
+describe("compact editor attachments", () => {
+	it("replaces a pasted path with a placeholder and submits the same image", async () => {
+		vi.useFakeTimers();
+		try {
+			const image = {
+				type: "image" as const,
+				data: "RAW",
+				mimeType: "image/png",
+			};
+			const deps = {
+				readImageContentFromPathAsync: vi.fn(async () => image),
+				loadImageContentFromPath: vi.fn(async () => null),
+			};
+			const { handlers, ctx } = makeHarness(deps);
+			ctx.ui.getEditorText = vi.fn(() => "/tmp/screenshot.png\nfix the conflict");
+
+			await handlers.get("session_start")!(undefined, ctx);
+			await vi.advanceTimersByTimeAsync(300);
+
+			expect(ctx.ui.setEditorText).toHaveBeenCalledWith(
+				"[Image #1]\nfix the conflict",
+			);
+
+			const result = await handlers.get("input")!(
+				{ text: "[Image #1]\nfix the conflict", images: [] },
+				ctx,
+			);
+
+			expect(result).toEqual({
+				action: "transform",
+				text: "fix the conflict",
+				images: [image],
+			});
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("loads and submits a raw path when the user submits before the poll runs", async () => {
+		const image = {
+			type: "image" as const,
+			data: "FAST",
+			mimeType: "image/png",
+		};
+		const deps = {
+			readImageContentFromPathAsync: vi.fn(async () => image),
+			loadImageContentFromPath: vi.fn(async () => null),
+		};
+		const { handlers, ctx } = makeHarness(deps);
+
+		const result = await handlers.get("input")!(
+			{ text: "/tmp/fast.png explain this", images: [] },
+			ctx,
+		);
+
+		expect(result).toEqual({
+			action: "transform",
+			text: "explain this",
+			images: [image],
+		});
+	});
+
+	it("does not submit an attachment after its placeholder is deleted", async () => {
+		vi.useFakeTimers();
+		try {
+			const image = {
+				type: "image" as const,
+				data: "RAW",
+				mimeType: "image/png",
+			};
+			const deps = {
+				readImageContentFromPathAsync: vi.fn(async () => image),
+				loadImageContentFromPath: vi.fn(async () => null),
+			};
+			const { handlers, ctx } = makeHarness(deps);
+			let editorText = "/tmp/remove.png";
+			ctx.ui.getEditorText = vi.fn(() => editorText);
+			ctx.ui.setEditorText = vi.fn((text: string) => {
+				editorText = text;
+			});
+
+			await handlers.get("session_start")!(undefined, ctx);
+			await vi.advanceTimersByTimeAsync(300);
+			expect(editorText).toBe("[Image #1]");
+
+			editorText = "plain prompt";
+			await vi.advanceTimersByTimeAsync(300);
+			const result = await handlers.get("input")!(
+				{ text: editorText, images: [] },
+				ctx,
+			);
+
+			expect(result).toEqual({ action: "continue" });
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+});

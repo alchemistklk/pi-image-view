@@ -9,6 +9,7 @@ import { debugLog } from "./debug.ts";
 
 type TrackedImage = {
 	filePath: string;
+	placeholder: string;
 	/** Full-resolution image attached to the submitted message. */
 	image: ImageContent;
 	/** Small PNG thumbnail used only for the inline gallery preview. */
@@ -72,8 +73,23 @@ type ToolResultEvent = import("./tool-result-upgrader.ts").ToolResultEventLike;
 
 // ── Constants ──────────────────────────────────────────────
 
-const WIDGET_KEY = "image-preview";
+const WIDGET_KEY = "image-view";
 const POLL_INTERVAL_MS = 250;
+const IMAGE_PLACEHOLDER_RE = /\[Image #\d+\]/g;
+
+function placeholdersIn(text: string): Set<string> {
+	return new Set(text.match(IMAGE_PLACEHOLDER_RE) ?? []);
+}
+
+function stripAttachmentTokens(text: string, tokens: string[]): string {
+	let stripped = text;
+	for (const token of tokens) stripped = stripped.split(token).join("");
+	return stripped
+		.split("\n")
+		.map((line) => line.replace(/[ \t]{2,}/g, " ").trimEnd())
+		.join("\n")
+		.trim();
+}
 
 /** Produce a label from an image path — just the filename. */
 function trimImageLabel(filePath: string): string {
@@ -90,6 +106,8 @@ export function registerImagePreviewExtension(
 	let gallery: ImageGallery | null = null;
 	let pollTimer: ReturnType<typeof setInterval> | null = null;
 	let latestCtx: CtxLike | null = null;
+	let nextPlaceholderNumber = 1;
+	let scanInFlight = false;
 
 	// ── Helpers ────────────────────────────────────────────
 
@@ -142,6 +160,7 @@ export function registerImagePreviewExtension(
 			gallery = null;
 		}
 		tracked = new Map();
+		nextPlaceholderNumber = 1;
 		ctx.ui.setWidget(WIDGET_KEY, undefined);
 	}
 
@@ -151,75 +170,62 @@ export function registerImagePreviewExtension(
 	 * Async to avoid blocking the event loop with file I/O.
 	 */
 	async function scanEditorText(ctx: CtxLike): Promise<void> {
-		let text: string;
+		if (scanInFlight) return;
+		scanInFlight = true;
 		try {
-			text = ctx.ui.getEditorText();
-		} catch (err) {
-			debugLog("Failed to get editor text", err);
-			return;
-		}
-		if (!text) {
-			if (tracked.size > 0) {
-				tracked = new Map();
-				refreshWidget(ctx);
+			let text: string;
+			try {
+				text = ctx.ui.getEditorText();
+			} catch (err) {
+				debugLog("Failed to get editor text", err);
+				return;
 			}
-			return;
-		}
 
-		// Find all image paths currently in the text. Handles plain, relative,
-		// home-relative, backslash-escaped, and quoted paths (typed, pasted, or
-		// inserted by drag-and-drop). Track by the exact editor substring (`raw`)
-		// so removal and submit matching stay in sync with the visible text, but
-		// read the file and build the label from the resolved `path`.
-		const detected = extractImagePaths(text);
-		const currentPaths = new Set<string>();
-
-		let changed = false;
-
-		for (const { raw, path: filePath } of detected) {
-			currentPaths.add(raw);
-
-			// Already tracked?
-			if (tracked.has(raw)) continue;
-
-			// New path — try to load it (async to avoid blocking event loop)
-			const image = await deps.readImageContentFromPathAsync(filePath);
-			if (!image) continue;
-
-			tracked.set(raw, {
-				filePath,
-				image,
-				label: trimImageLabel(filePath),
-			});
-			changed = true;
-
-			// Build the small PNG preview thumbnail in the background so a large
-			// image renders instead of overflowing kitty/tmux transmission. The
-			// full image stays in `entry.image` for the message attachment.
-			if (deps.maybeResizeImage) {
-				const entry = tracked.get(raw)!;
-				void deps.maybeResizeImage(image).then((resized) => {
-					// Guard against the entry having been removed while resize was in-flight
-					if (tracked.has(raw) && tracked.get(raw) === entry) {
-						entry.previewImage = resized;
-						if (latestCtx) refreshWidget(latestCtx);
-					}
-				}).catch((err) => {
-					debugLog(`Failed to resize image ${filePath}`, err);
-				});
+			const visiblePlaceholders = placeholdersIn(text);
+			let changed = false;
+			for (const placeholder of tracked.keys()) {
+				if (!visiblePlaceholders.has(placeholder)) {
+					tracked.delete(placeholder);
+					changed = true;
+				}
 			}
-		}
 
-		// Remove tracked images whose paths are no longer in the text
-		for (const trackedPath of tracked.keys()) {
-			if (!currentPaths.has(trackedPath)) {
-				tracked.delete(trackedPath);
+			let renderedText = text;
+			for (const { raw, path: filePath } of extractImagePaths(text)) {
+				const image = await deps.readImageContentFromPathAsync(filePath);
+				if (!image) continue;
+
+				let placeholder: string;
+				do {
+					placeholder = `[Image #${nextPlaceholderNumber++}]`;
+				} while (renderedText.includes(placeholder) || tracked.has(placeholder));
+
+				const entry: TrackedImage = {
+					filePath,
+					placeholder,
+					image,
+					label: trimImageLabel(filePath),
+				};
+				tracked.set(placeholder, entry);
+				renderedText = renderedText.replace(raw, placeholder);
 				changed = true;
-			}
-		}
 
-		if (changed) {
-			refreshWidget(ctx);
+				if (deps.maybeResizeImage) {
+					void deps.maybeResizeImage(image).then((resized) => {
+						if (tracked.get(placeholder) === entry) {
+							entry.previewImage = resized;
+							if (latestCtx) refreshWidget(latestCtx);
+						}
+					}).catch((err) => {
+						debugLog(`Failed to resize image ${filePath}`, err);
+					});
+				}
+			}
+
+			if (renderedText !== text) ctx.ui.setEditorText(renderedText);
+			if (changed) refreshWidget(ctx);
+		} finally {
+			scanInFlight = false;
 		}
 	}
 
@@ -281,47 +287,65 @@ export function registerImagePreviewExtension(
 		);
 	});
 
-	// On submit: strip image paths from text, attach actual images
+	// On submit: remove local placeholders/paths and attach the same image content.
 	pi.on("input", async (event: InputEvent, ctx: CtxLike): Promise<InputResult> => {
 		latestCtx = ctx;
-
-		if (tracked.size === 0) {
-			return { action: "continue" };
-		}
-
 		const fullText = (event.text || "").trim();
 
-		// Don't transform commands or shell escapes
-		if (fullText.startsWith("/") || fullText.trimStart().startsWith("!")) {
+		const detectedPaths = extractImagePaths(fullText);
+		if (
+			(fullText.startsWith("/") && detectedPaths.length === 0) ||
+			fullText.trimStart().startsWith("!")
+		) {
 			return { action: "continue" };
 		}
 
-		// Collect images for all tracked paths in the submitted text, resizing
-		// them concurrently while preserving their order in the submitted text.
-		const matched = [...tracked.entries()]
-			.filter(([trackedPath]) => fullText.includes(trackedPath))
-			.map(([, entry]) => entry);
+		const candidates: Array<{ token: string; entry: TrackedImage; index: number }> = [];
+		for (const [placeholder, entry] of tracked) {
+			const index = fullText.indexOf(placeholder);
+			if (index >= 0) candidates.push({ token: placeholder, entry, index });
+		}
+
+		// Fast-submit fallback: the input event may arrive before the 250ms editor
+		// poll has converted a freshly pasted path into a placeholder.
+		for (const { raw, path: filePath } of detectedPaths) {
+			const image = await deps.readImageContentFromPathAsync(filePath);
+			if (!image) continue;
+			candidates.push({
+				token: raw,
+				index: fullText.indexOf(raw),
+				entry: {
+					filePath,
+					placeholder: raw,
+					image,
+					label: trimImageLabel(filePath),
+				},
+			});
+		}
+
+		if (candidates.length === 0) return { action: "continue" };
+		candidates.sort((a, b) => a.index - b.index);
+
 		const usedImages: ImageContent[] = await Promise.all(
-			matched.map((entry) =>
+			candidates.map(({ entry }) =>
 				deps.resizeForSubmission
 					? deps.resizeForSubmission(entry.image)
 					: Promise.resolve(entry.image),
 			),
 		);
-
-		if (usedImages.length === 0) {
-			return { action: "continue" };
-		}
-
-		// Clear state
+		const transformedText = stripAttachmentTokens(
+			fullText,
+			candidates.map(({ token }) => token),
+		);
+		const images = [...(event.images ?? []), ...usedImages];
 		resetDraft(ctx);
 
-		// Keep the original text as-is (paths stay visible in chat),
-		// just attach the actual image data alongside
-		return {
-			action: "transform",
-			text: fullText,
-			images: [...(event.images ?? []), ...usedImages],
-		};
+		if (!transformedText) {
+			pi.sendUserMessage(images, ctx.isIdle() ? undefined : { deliverAs: "steer" });
+			return { action: "handled" };
+		}
+
+		return { action: "transform", text: transformedText, images };
 	});
+
 }
