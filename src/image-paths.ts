@@ -6,9 +6,10 @@ export interface DetectedImagePath {
 }
 
 const IMAGE_EXT = "(?:png|jpe?g|gif|webp)";
-const BARE_PATH = `(?:~/|\\.\\.?/|/)(?:\\\\.|[^\\s:*?"<>|])*\\.${IMAGE_EXT}(?=\\s|$)`;
-const WINDOWS_DRIVE_PATH = `[A-Za-z]:[\\\\/][^\\s*?"<>|]*\\.${IMAGE_EXT}(?=\\s|$)`;
-const WINDOWS_UNC_PATH = `\\\\\\\\[^\\\\/\\s:*?"<>|]+[\\\\/][^\\s*?"<>|]*\\.${IMAGE_EXT}(?=\\s|$)`;
+const PATH_END = `(?=[\\s,.;:!?)\\]]|$)`;
+const BARE_PATH = `(?:~/|\\.\\.?/|/)(?:\\\\.|[^\\s:*?"<>|])*\\.${IMAGE_EXT}${PATH_END}`;
+const WINDOWS_DRIVE_PATH = `[A-Za-z]:[\\\\/][^\\s*?"<>|]*\\.${IMAGE_EXT}${PATH_END}`;
+const WINDOWS_UNC_PATH = `\\\\\\\\[^\\\\/\\s:*?"<>|]+[\\\\/][^\\s*?"<>|]*\\.${IMAGE_EXT}${PATH_END}`;
 const DOUBLE_QUOTED_PATH = `"(?:\\\\.|[^"\\\\])*\\.${IMAGE_EXT}"`;
 const SINGLE_QUOTED_PATH = `'(?:\\\\.|[^'\\\\])*\\.${IMAGE_EXT}'`;
 const IMAGE_PATH_RE = new RegExp(

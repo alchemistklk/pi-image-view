@@ -65,4 +65,13 @@ it("preserves quoted Windows spaces and converts drive paths under WSL", () => {
 	})).toBe("/mnt/c/Users/me/shot.png");
 });
 
+
+it("accepts common punctuation immediately after unquoted paths", () => {
+	expect(extractImagePaths(String.raw`/tmp/a.png, C:\Users\me\b.jpg; \\server\share\c.webp)`)).toEqual([
+		{ raw: "/tmp/a.png", path: "/tmp/a.png" },
+		{ raw: String.raw`C:\Users\me\b.jpg`, path: String.raw`C:\Users\me\b.jpg` },
+		{ raw: String.raw`\\server\share\c.webp`, path: String.raw`\\server\share\c.webp` },
+	]);
+});
+
 });

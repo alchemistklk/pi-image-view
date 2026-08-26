@@ -57,7 +57,7 @@ Then paste an image with `Ctrl+V` (`Alt+V` on Windows/WSL). If Pi is already run
 5. Before each model call, a context hook removes the local target, leaving the model only `[Image #N]` plus the image attachment.
 6. A display-only Markdown transformer keeps compatibility with pre-release `image-view://` references.
 
-The original `/var/folders/...` clipboard path is never sent to the model. Normally the submitted bytes are a 480px PNG thumbnail. If Pi cannot resize or convert the image, the extension fails open to the source image so the attachment is not lost; the persistent blob then contains that submitted fallback. The local blob path is stored only as history display metadata and is stripped from model-facing context.
+The original `/var/folders/...` clipboard path is never sent to the model. Normally the submitted bytes are a 480px PNG thumbnail. If resizing fails, the extension falls back to the source image so the attachment is not lost. If resizing succeeds but PNG conversion alone fails, it submits the resized image in its available format. The persistent blob contains whichever model image was actually submitted. The local blob path is stored only as history display metadata and is stripped from model-facing context.
 
 ## Clear existing model image context
 
@@ -123,7 +123,7 @@ Both extensions still represent N images as N `ImageContent` blocks until Pi com
 
 For v0.2.0:
 
-- 42 automated tests pass across 9 files.
+- 44 automated tests pass across 9 files.
 - Production dependency audit reports 0 vulnerabilities.
 - `npm pack --dry-run` and `npm publish --dry-run` pass.
 - An isolated Pi load probe succeeds.

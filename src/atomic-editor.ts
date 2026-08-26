@@ -11,11 +11,15 @@ interface EditorInternals {
 	historyIndex?: number;
 }
 
+const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+const wordSegmenter = new Intl.Segmenter(undefined, { granularity: "word" });
+
 export class ImageViewAtomicEditor extends CustomEditor {
 	constructor(tui: TUI, theme: EditorTheme, private readonly imageViewKeys: KeybindingsManager) {
 		super(tui, theme, imageViewKeys);
 		const internals = this as unknown as EditorInternals;
-		internals.segment = (text) => segmentAtomicImageMarkers(text);
+		internals.segment = (text, mode = "grapheme") =>
+			segmentAtomicImageMarkers(text, mode === "word" ? wordSegmenter : graphemeSegmenter);
 	}
 
 	override handleInput(data: string): void {

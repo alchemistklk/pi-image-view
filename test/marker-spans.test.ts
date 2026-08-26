@@ -6,6 +6,8 @@ describe("atomic image markers", () => {
 		const text = "before [Image #12] after";
 		expect(imageMarkerSpans(text)).toEqual([{ start: 7, end: 18, text: "[Image #12]" }]);
 		expect(segmentAtomicImageMarkers(text).map((part) => part.segment)).toContain("[Image #12]");
+		const words = segmentAtomicImageMarkers(text, new Intl.Segmenter("en", { granularity: "word" }));
+		expect(words.map((part) => part.segment)).toEqual(expect.arrayContaining(["before", "[Image #12]", "after"]));
 	});
 
 	it("matches movement and deletion across the whole marker", () => {

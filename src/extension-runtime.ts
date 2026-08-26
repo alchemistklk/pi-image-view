@@ -141,8 +141,9 @@ export function registerImagePreviewExtension(
 	});
 
 	pi.on("context", (event: { messages: Array<{ role?: unknown; content?: unknown }> }) => {
-		if (clearBeforeIndex !== undefined && event.messages.length < clearBeforeIndex) {
-			clearBeforeIndex = 0;
+		if (clearBeforeIndex !== undefined && event.messages.length < lastContextMessageCount) {
+			const removedPrefixLength = lastContextMessageCount - event.messages.length;
+			clearBeforeIndex = Math.max(0, clearBeforeIndex - removedPrefixLength);
 		}
 		if (clearOnNextContext) {
 			let latestUserIndex = -1;

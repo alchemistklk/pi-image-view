@@ -107,4 +107,27 @@ describe("model image context clearing", () => {
 		await handlers.get("session_start")!(undefined, ctx);
 		expect(handlers.get("context")!({ messages: old }).messages[0].content).toEqual([image("OLD")]);
 	});
+
+	it("rebases the clear boundary when compaction removes a context prefix", () => {
+		const { handlers, command, ctx } = contextHarness();
+		const beforeClear = [
+			{ role: "user", content: [image("VERY_OLD")] },
+			{ role: "assistant", content: [{ type: "text", text: "done" }] },
+			{ role: "user", content: [image("OLD")] },
+		];
+		handlers.get("context")!({ messages: beforeClear });
+		command.handler("clear", ctx);
+		const afterClear = [...beforeClear, { role: "user", content: [image("NEW")] }];
+		handlers.get("context")!({ messages: afterClear });
+
+		const compacted = [
+			{ role: "user", content: [image("OLD")] },
+			{ role: "user", content: [image("NEW")] },
+		];
+		const result = handlers.get("context")!({ messages: compacted }).messages;
+
+		expect(result[0].content).toEqual([{ type: "text", text: "[Image omitted from model context]" }]);
+		expect(result[1].content).toEqual([image("NEW")]);
+	});
+
 });
