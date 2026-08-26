@@ -36,7 +36,12 @@ async function persistImage(image: Parameters<typeof putImageBlob>[0]): Promise<
 }
 
 function resolvePersistedImage(reference: string): string | undefined {
-	if (!getCapabilities().hyperlinks) return undefined;
+	try {
+		if (!getCapabilities().hyperlinks) return undefined;
+	} catch {
+		// Capability probing can be unavailable during transcript reconstruction.
+		// Continue with the safe file target instead of leaking the internal scheme.
+	}
 	const filePath = resolveImageReference(reference);
 	return filePath && existsSync(filePath) ? filePath : undefined;
 }
