@@ -14,6 +14,7 @@ type Handler = (...args: any[]) => any;
 function makeHarness(deps: any) {
 	const handlers = new Map<string, Handler>();
 	const commands = new Map<string, { handler: (args: string, ctx: any) => void }>();
+	let terminalInputHandler: ((data: string) => unknown) | undefined;
 	let markdownTransformer: ((markdown: string, context: { messageType: string }) => string) | undefined;
 	const pi = {
 		on: (event: string, handler: Handler) => handlers.set(event, handler),
@@ -27,6 +28,7 @@ function makeHarness(deps: any) {
 		hasUI: true,
 		isIdle: () => true,
 		ui: {
+			onTerminalInput: vi.fn((handler: (data: string) => unknown) => { terminalInputHandler = handler; return vi.fn(); }),
 			setEditorComponent: vi.fn(),
 			notify: vi.fn(),
 			setWidget: vi.fn(),
@@ -36,7 +38,7 @@ function makeHarness(deps: any) {
 		},
 	};
 	registerImagePreviewExtension(pi as any, deps);
-	return { handlers, command: commands.get("pi-image-view")!, ctx, getMarkdownTransformer: () => markdownTransformer };
+	return { handlers, command: commands.get("pi-image-view")!, ctx, getMarkdownTransformer: () => markdownTransformer, getTerminalInputHandler: () => terminalInputHandler };
 }
 
 describe("compact editor attachments", () => {
@@ -345,6 +347,34 @@ describe("draft scan lifecycle", () => {
 		expect(ctx.ui.setEditorComponent).toHaveBeenCalledWith(createAtomicEditor);
 		await handlers.get("session_shutdown")!(undefined, ctx);
 		expect(ctx.ui.setEditorComponent).toHaveBeenLastCalledWith(undefined);
+	});
+
+
+	it("converts a newly pasted image path during the rapid paste scan window", async () => {
+		vi.useFakeTimers();
+		try {
+			const image = { type: "image" as const, data: "PASTED", mimeType: "image/png" };
+			const { handlers, ctx, getTerminalInputHandler } = makeHarness({
+				readImageContentFromPathAsync: vi.fn(async () => image),
+				loadImageContentFromPath: vi.fn(async () => null),
+				isImagePasteInput: (data: string) => data === "PASTE",
+			});
+			let editorText = "";
+			ctx.ui.getEditorText = vi.fn(() => editorText);
+			ctx.ui.setEditorText = vi.fn((text: string) => { editorText = text; });
+			await handlers.get("session_start")!(undefined, ctx);
+
+			getTerminalInputHandler()!("PASTE");
+			await vi.advanceTimersByTimeAsync(10);
+			editorText = "/tmp/pasted.png"; // Pi's built-in async clipboard handler inserts the path.
+			await vi.advanceTimersByTimeAsync(10);
+
+			expect(editorText).toBe("[Image #1]");
+			expect(ctx.ui.setEditorText).toHaveBeenCalledTimes(1);
+			await handlers.get("session_shutdown")!(undefined, ctx);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it("polls only with UI and cleans up on session shutdown", async () => {

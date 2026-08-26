@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { convertToPng, resizeImage } from "@earendil-works/pi-coding-agent";
-import { getCapabilities } from "@earendil-works/pi-tui";
+import { getCapabilities, matchesKey } from "@earendil-works/pi-tui";
 import {
 	putImageBlob,
 	resolveImageReference,
@@ -64,6 +64,7 @@ export function createImageView(options: ImageViewOptions = {}) {
 		maybeResizeImage: buildPreviewThumbnail,
 		resizeDetailImage: buildDetailImage,
 		normalizeImageForMatching,
+		isImagePasteInput: (data) => matchesKey(data, "ctrl+v") || matchesKey(data, "alt+v"),
 		createAtomicEditor: options.atomicMarkers || process.env.PI_IMAGE_VIEW_ATOMIC_MARKERS === "1"
 			? createAtomicMarkerEditor
 			: undefined,

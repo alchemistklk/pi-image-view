@@ -31,6 +31,7 @@ export type ExtensionDeps = {
 	resizeDetailImage?: (image: ImageContent) => Promise<ImageContent>;
 	normalizeImageForMatching?: (image: ImageContent) => Promise<ImageContent>;
 	createAtomicEditor?: (tui: unknown, theme: unknown, keybindings: unknown) => unknown;
+	isImagePasteInput?: (data: string) => boolean;
 	loadImageContentFromPath: (
 		filePath: string,
 	) => Promise<ImageContent | null>;
@@ -52,6 +53,7 @@ type CtxLike = {
 	mode?: "tui" | "rpc" | "json" | "print";
 	isIdle(): boolean;
 	ui: {
+		onTerminalInput?(handler: (data: string) => { consume?: boolean; data?: string } | undefined): () => void;
 		setEditorComponent?(factory: ((tui: unknown, theme: unknown, keybindings: unknown) => unknown) | undefined): void;
 		setWidget(
 			key: string,
@@ -163,6 +165,8 @@ export function registerImagePreviewExtension(
 	let tracked: Map<string, TrackedImage> = new Map();
 	let gallery: ImageGallery | null = null;
 	let pollTimer: ReturnType<typeof setInterval> | null = null;
+	let unsubscribeTerminalInput: (() => void) | undefined;
+	const pasteScanTimers = new Set<ReturnType<typeof setTimeout>>();
 	let latestCtx: CtxLike | null = null;
 	let nextPlaceholderNumber = 1;
 	let scanInFlight = false;
@@ -339,6 +343,19 @@ export function registerImagePreviewExtension(
 		}
 	}
 
+	function schedulePasteScans(ctx: CtxLike): void {
+		for (const timer of pasteScanTimers) clearTimeout(timer);
+		pasteScanTimers.clear();
+		for (const delay of [0, 16, 40, 80, 160, 240]) {
+			const timer = setTimeout(() => {
+				pasteScanTimers.delete(timer);
+				scanEditorText(ctx).catch((error) => debugLog("Paste-triggered image scan failed", error));
+			}, delay);
+			timer.unref?.();
+			pasteScanTimers.add(timer);
+		}
+	}
+
 	function startPolling(): void {
 		stopPolling();
 		pollTimer = setInterval(() => {
@@ -366,6 +383,10 @@ export function registerImagePreviewExtension(
 
 	const cleanup = (): void => {
 		stopPolling();
+		unsubscribeTerminalInput?.();
+		unsubscribeTerminalInput = undefined;
+		for (const timer of pasteScanTimers) clearTimeout(timer);
+		pasteScanTimers.clear();
 		scanGeneration += 1;
 		lastScannedText = undefined;
 		latestCtx = null;
@@ -387,6 +408,12 @@ export function registerImagePreviewExtension(
 		}
 		if (ctx.hasUI !== false && ctx.mode !== "print" && ctx.mode !== "json") {
 			startPolling();
+			if (deps.isImagePasteInput && ctx.ui.onTerminalInput) {
+				unsubscribeTerminalInput = ctx.ui.onTerminalInput((data) => {
+					if (deps.isImagePasteInput!(data)) schedulePasteScans(ctx);
+					return undefined;
+				});
+			}
 		}
 	});
 

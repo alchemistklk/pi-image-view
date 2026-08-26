@@ -20,6 +20,7 @@ The reference remains in conversation history and is clickable. The image itself
 - Deduplicates identical image content
 - Removes internal blob targets from model-facing context
 - Provides session-scoped control over which image attachments reach the model
+- Converts pasted clipboard paths through a rapid 0–240ms scan burst instead of waiting for the normal poll
 - Handles immediate submit before the editor polling cycle runs
 - Supports multiple images and removal by deleting a placeholder
 - Resizes screenshot tool-result images through the same thumbnail pipeline
@@ -123,7 +124,7 @@ Both extensions still represent N images as N `ImageContent` blocks until Pi com
 
 For v0.2.0:
 
-- 44 automated tests pass across 9 files.
+- 45 automated tests pass across 9 files.
 - Production dependency audit reports 0 vulnerabilities.
 - `npm pack --dry-run` and `npm publish --dry-run` pass.
 - An isolated Pi load probe succeeds.
