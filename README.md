@@ -1,35 +1,30 @@
 # pi-image-view
 
-Compact, persistent image references and inline previews for the [Pi coding agent](https://pi.dev).
+**Paste a screenshot into the [Pi coding agent](https://pi.dev) without pasting a filesystem path.**
 
-When an image is pasted or dragged into Pi, the editor normally contains a long local path. `pi-image-view` replaces it with a stable pure-text reference:
+`pi-image-view` is a Pi extension that turns pasted, dragged, and typed image paths into a stable `[Image #N]` reference, sends the model a compact 480px PNG thumbnail instead of the full-size original, and keeps the reference clickable in conversation history for the life of the session and beyond.
 
 ```text
-[Image #1]
-Help me resolve this conflict.
+# Before                                    # After
+/var/folders/9x/T/screenshot 3.png          [Image #1]
+Help me resolve this conflict.              Help me resolve this conflict.
 ```
 
-The reference remains in conversation history and is clickable. The image itself is still attached to the model; temporary clipboard paths are never sent.
+The model receives `[Image #1]` plus the image attachment. It never receives the local path.
 
-## Features
+---
 
-- Replaces pasted and dragged image paths with `[Image #N]`
-- Keeps `[Image #N]` in new and restored conversation history
-- Makes historical references clickable through terminal OSC 8 links
-- Stores submitted model images in a content-addressed SHA-256 blob store (normally 480px PNG thumbnails)
-- Deduplicates identical image content
-- Removes internal blob targets from model-facing context
-- Provides session-scoped control over which image attachments reach the model
-- Inserts `[Image #N]` directly from the clipboard on macOS, Windows, and WSL without showing a temporary path
-- Uses a rapid 0–240ms scan burst as the native-Linux and drag/drop fallback
-- Handles immediate submit before the editor polling cycle runs
-- Supports multiple images and removal by deleting a placeholder
-- Resizes screenshot tool-result images through the same thumbnail pipeline
-- Supports Windows drive, UNC, and WSL-translated image paths
-- Offers optional atomic marker navigation/deletion for compatible editor setups
-- Offers one-shot 1280px detail mode for small text and dense screenshots
-- Uses the same best-effort 480px PNG thumbnail for inline preview and model submission
-- Supports tmux through Kitty's Unicode placeholder protocol
+## When to use this
+
+Install `pi-image-view` if you:
+
+- paste screenshots into Pi regularly and don't want temporary clipboard paths cluttering the prompt
+- want to scroll back through a long session and still click an image you sent an hour ago
+- are paying for image tokens on large screenshots and want a 480px thumbnail sent instead of a 2000px original
+- share or export session transcripts and don't want local `file://` paths reaching the provider
+- work inside tmux and want inline draft previews to survive the passthrough
+
+You do **not** need it if you only send images occasionally and don't care about history, payload size, or path privacy — Pi's built-in paste already attaches the image.
 
 ## Install
 
@@ -37,75 +32,147 @@ The reference remains in conversation history and is clickable. The image itself
 pi install npm:pi-image-view
 ```
 
-Try it for one run:
+Try it for a single run without installing:
 
 ```bash
 pi -e npm:pi-image-view
 ```
 
-Then paste an image with `Ctrl+V` (`Alt+V` on Windows/WSL). If Pi is already running after installation, use `/reload`.
+Paste an image with `Ctrl+V` (`Alt+V` on Windows and WSL). If Pi is already running, `/reload` picks up a fresh install.
+
+**Requirements:** Pi `0.84.3`–`0.84.x`. Inline thumbnails additionally need a Kitty-graphics-capable terminal; everything else degrades to text.
+
+## Commands
+
+| Command | Effect |
+| --- | --- |
+| `/pi-image-view clear` | Drop images already in the session from **future** model requests. Non-destructive: history, links, and blobs are untouched. Resets on a new session or `/reload`. |
+| `/pi-image-view detail` | Send the **next** image batch at 1280px instead of 480px, for small text or dense diagrams. Reverts automatically afterward. |
+
+## Interaction
+
+| Action | Key | Behavior |
+| --- | --- | --- |
+| Paste image | `Ctrl+V` / `Alt+V` | Inserts `[Image #N]` directly on macOS, Windows, WSL. No temporary path is ever displayed. |
+| Paste text | `Ctrl+V` / `Alt+V` | Unchanged — text pastes as text. |
+| Drag & drop a file | — | The dropped path is detected and replaced within ~240ms. |
+| Move across a marker | `←` / `→` | Jumps the whole `[Image #N]` marker, not character by character. |
+| Delete a marker | `Backspace` / `Delete` | Removes the whole marker in one undoable action. Removing the marker detaches the image. |
+
+## Quick reference
+
+| | |
+| --- | --- |
+| **Formats** | PNG, JPEG/JPG, GIF (first frame), WebP |
+| **Source size limit** | 50 MB; larger files are skipped |
+| **Model payload** | Best-effort 480px PNG thumbnail (1280px for one batch after `/pi-image-view detail`) |
+| **Blob store** | `~/.pi/agent/image-view/blobs/<sha256>.<ext>` (honors `PI_CODING_AGENT_DIR`) |
+| **Path forms** | Unix absolute, `~/`, `./`, `../`, Windows drive (`C:\...`), UNC (`\\host\share\...`), and quoted paths with spaces. Shell escapes (`~/My\ Photo.png`) are resolved; `./` and `../` resolve against the active Pi cwd. |
+| **WSL** | Windows drive paths are translated to `/mnt/<drive>/...` |
+| **Editor scan** | 250ms non-blocking poll, plus a 0–240ms burst after a paste keystroke, plus an immediate-submit fallback |
+| **Debug logging** | `PI_IMAGE_VIEW_DEBUG=1 pi` (writes to stderr) |
 
 ## How it works
 
-1. Pi writes a pasted image to a temporary path.
-2. The extension loads it and replaces the editor path with `[Image #N]`.
-3. The extension awaits a best-effort 480px PNG preview, submits that model image, and writes the same bytes to:
+1. Pi writes a pasted image to a temporary path — or, on macOS/Windows/WSL, `pi-image-view` reads the clipboard itself and skips this step.
+2. The extension loads the image and replaces the path in the editor with `[Image #N]`.
+3. On submit it builds a best-effort 480px PNG preview, sends that as the model image, and writes the same bytes to a content-addressed blob:
 
    ```text
-   ~/.pi/agent/image-view/blobs/<sha256>.<ext>
+   ~/.pi/agent/image-view/blobs/<sha256>.png
    ```
 
-4. Session text stores a clickable `file://` link to that persistent blob behind `[Image #N]`.
-5. Before each model call, a context hook removes the local target, leaving the model only `[Image #N]` plus the image attachment.
-6. A display-only Markdown transformer keeps compatibility with pre-release `image-view://` references.
+4. Session text stores a clickable `file://` link to that blob behind `[Image #N]`.
+5. A `context` hook strips the link target before every model call, leaving the model `[Image #N]` plus the attachment.
+6. A display-only Markdown transformer keeps pre-release `image-view://` references rendering.
 
-The original `/var/folders/...` clipboard path is never sent to the model. Normally the submitted bytes are a 480px PNG thumbnail. If resizing fails, the extension falls back to the source image so the attachment is not lost. If resizing succeeds but PNG conversion alone fails, it submits the resized image in its available format. The persistent blob contains whichever model image was actually submitted. The local blob path is stored only as history display metadata and is stripped from model-facing context.
+Identical images share one blob, so pasting the same screenshot twice costs one file.
 
-## Clear existing model image context
+### Resize fallback
 
-When a long session has accumulated many images, clear the images that already exist from subsequent model requests:
+Resizing is best-effort and never drops an attachment:
 
-```text
-/pi-image-view clear
-```
+| Outcome | What gets sent and stored |
+| --- | --- |
+| Resize and PNG conversion succeed | 480px PNG (the normal path) |
+| Resize succeeds, PNG conversion fails | The resized image in its available format |
+| Resize fails | The source image, unchanged |
 
-`clear` is non-destructive: session history, clickable references, entries, and stored blobs remain unchanged. Images attached after the command continue to be sent normally. Starting another session or reloading the extension resets the clear boundary.
+The stored blob always contains whichever bytes were actually submitted.
 
-For a screenshot whose small text needs more detail, arm the next image submission at 1280px:
+## Platform behavior
 
-```text
-/pi-image-view detail
-```
+| Platform | Clipboard image paste | Editor |
+| --- | --- | --- |
+| macOS | Read directly via `osascript`; `[Image #N]` appears immediately | `pi-image-view` custom editor |
+| Windows | Read directly via PowerShell | `pi-image-view` custom editor |
+| WSL | Read directly via `powershell.exe` interop | `pi-image-view` custom editor |
+| Native Linux | Falls back to Pi's paste plus burst path scans | Pi's default editor |
 
-Detail mode applies to the next submitted image batch only, then automatically returns to the 480px default.
+Selection is automatic. There is no environment variable or wrapper to configure.
 
-The extension always strips local file and internal image-link targets before model calls. Image-only historical messages receive a short text placeholder when their attachment is omitted.
+## Terminal support
+
+Pure-text `[Image #N]` references work in every Pi-supported terminal.
+
+- **Clickable links** need OSC 8 support. On macOS use your terminal's normal link modifier, typically `Command`-click.
+- **Inline draft thumbnails** need Kitty 0.28+ (or another terminal implementing the Kitty graphics protocol). Other terminals get a text-only preview label.
+- **tmux 3.3a+** additionally needs passthrough enabled:
+
+  ```tmux
+  set -g allow-passthrough all
+  ```
 
 ## Session portability and privacy
 
-Clickable history references store an absolute local `file://` Blob path in the Pi session JSONL. The extension strips that target from model-facing context, so providers receive only `[Image #N]` plus the image attachment. However, exporting or sharing the raw session can reveal the local username/path, and the link will not work on another machine. Review session data before sharing it.
+Clickable history references store an absolute local `file://` blob path in Pi's session JSONL. That target is stripped from model-facing context, so providers receive only `[Image #N]` plus the attachment.
+
+Two consequences worth knowing before you share a session:
+
+- A raw session export reveals your local username and paths.
+- The links will not resolve on another machine.
+
+Review session data before sharing it.
 
 ## Blob lifecycle
 
-Identical images share one content-addressed blob. Automatic deletion is currently disabled: a Pi process can use a custom or temporary session directory, so scanning only that directory is not sufficient evidence that a globally stored blob is unreferenced. Until cleanup can coordinate across every configured session root and active process, preserving referenced history links takes priority over reclaiming disk space.
+Automatic deletion is deliberately disabled. A Pi process can use a custom or temporary session directory, so scanning one directory is not sufficient evidence that a globally stored blob is unreferenced. Until cleanup can coordinate across every configured session root and every live process, preserving referenced history links takes priority over reclaiming disk space.
 
-## Performance snapshot
+To reclaim space manually, delete files under `~/.pi/agent/image-view/blobs/`. Historical `[Image #N]` references remain as text; only the links stop resolving.
 
-A local benchmark used the production 480px PNG payloads from five UI screenshots (118–157 KB each), isolated Pi sessions, `medium` thinking, and the prompt `Reply with exactly OK`. Each cell ran once cold and once warm; the table below shows the warm/cache-influenced round.
+## Troubleshooting
 
-| Model | 0 images | 10 images | 20 images | 40 images |
-| --- | ---: | ---: | ---: | ---: |
-| GPT-5.6 Luna | 5.61s | 6.98s | 7.51s | 9.44s |
-| GPT-5.6 Sol | 6.11s | 7.06s | 11.81s | 9.35s |
-| GPT-5.6 Terra | 10.48s | 8.32s | 9.18s | 11.64s |
+### The editor still shows a long path instead of `[Image #N]`
 
-All 12 measured requests completed successfully and the persisted image count matched the target count. Warm requests used approximately 1,664 / 4,096 / 7,680 cache-read tokens at 10 / 20 / 40 images. These are single-run measurements, not p50/p90 latency claims; provider variance is visible in the non-monotonic Sol and Terra rows.
+On native Linux, replacement happens on a scan a few frames after the paste — this is expected and resolves within ~240ms. If it persists anywhere, run `PI_IMAGE_VIEW_DEBUG=1 pi` and check stderr; the most common cause is a file extension outside PNG/JPEG/GIF/WebP or a file over 50 MB.
 
-A representative source image changed from 2114×1040 and 867,917 bytes to 480×236 and 125,889 bytes—about an 85% reduction. Use `/pi-image-view clear` when an unusually image-heavy session still becomes slow.
+### No inline thumbnail, just a text label
+
+Your terminal does not implement the Kitty graphics protocol. References, links, and model attachments all still work — only the inline draft preview is unavailable.
+
+### Thumbnails don't render inside tmux
+
+Add `set -g allow-passthrough all` to your tmux config and reload it. Requires tmux 3.3a or newer.
+
+### The whole gallery went text-only even though thumbnails usually work
+
+One of the attached images is not a PNG, which happens when PNG conversion fails. Kitty's `f=100` transmission accepts PNG only, so the gallery falls back to text rather than emitting a blank block.
+
+### Images stop working after installing `pi-zentui`
+
+Load order matters. Load `pi-image-view` **before** `pi-zentui` so Zentui wraps the image-view editor. The reverse order can destabilize editor/status reconciliation. Tracked in [Issue #1](https://github.com/alchemistklk/pi-image-view/issues/1); not yet fully resolved.
+
+### A long session with many screenshots got slow
+
+Run `/pi-image-view clear` to drop the already-sent images from future requests. History and links stay intact.
+
+### Small text in a screenshot is unreadable to the model
+
+Run `/pi-image-view detail`, then send the image. That batch goes out at 1280px.
 
 ## Compared with `pi-image-preview`
 
-`pi-image-view` is forked from `pi-image-preview` and keeps its core Kitty/tmux preview behavior. The main differences are:
+`pi-image-view` is forked from `pi-image-preview` and keeps its core Kitty/tmux preview behavior.
 
 | Capability | `pi-image-preview` 0.1.5 | `pi-image-view` 0.2.0 |
 | --- | --- | --- |
@@ -113,56 +180,38 @@ A representative source image changed from 2114×1040 and 867,917 bytes to 480×
 | Typical model payload | 480px preview | 480px preview |
 | Editor text | Local image path | `[Image #N]` |
 | Sent-history reference | No stable clickable reference | Clickable `[Image #N]` |
-| Persistent local image | No dedicated history Blob | SHA-256 content-addressed Blob |
-| Model-visible local path | Path can remain in message text | Link target is stripped before provider calls |
+| Persistent local image | No dedicated history blob | SHA-256 content-addressed blob |
+| Model-visible local path | Path can remain in message text | Link target stripped before provider calls |
 | Duplicate attachment protection | No normalized reconciliation | Exact and Pi-normalized matching |
-| Long-session escape hatch | Rely on Pi compaction/new session | Non-destructive `/pi-image-view clear` |
-| Automatic Blob deletion | Not applicable | Disabled for safety |
+| Long-session escape hatch | Rely on Pi compaction / new session | Non-destructive `/pi-image-view clear` |
+| Detail escape hatch | None | One-shot `/pi-image-view detail` at 1280px |
+| Automatic blob deletion | Not applicable | Disabled for safety |
 
-Both extensions still represent N images as N `ImageContent` blocks until Pi compacts the session or the user clears context. `pi-image-view` focuses on persistent, inspectable history without adding an automatic image-count cap.
+Both extensions still represent N images as N `ImageContent` blocks until Pi compacts the session or you clear context. A broader comparison against `pi-paster` and `pi-screenshots-picker` is in [docs/research/pi-image-plugin-comparison.md](docs/research/pi-image-plugin-comparison.md).
 
-## Release validation
+## Performance
 
-For v0.2.0:
+A local benchmark used production 480px PNG payloads from five UI screenshots (118–157 KB each), isolated Pi sessions, `medium` thinking, and the prompt `Reply with exactly OK`. Each cell ran once cold and once warm; the table shows the warm round.
 
-- 59 automated tests pass across 12 files.
-- Production dependency audit reports 0 vulnerabilities.
-- `npm pack --dry-run` and `npm publish --dry-run` pass.
-- An isolated Pi load probe succeeds.
+| Model | 0 images | 10 images | 20 images | 40 images |
+| --- | ---: | ---: | ---: | ---: |
+| GPT-5.6 Luna | 5.61s | 6.98s | 7.51s | 9.44s |
+| GPT-5.6 Sol | 6.11s | 7.06s | 11.81s | 9.35s |
+| GPT-5.6 Terra | 10.48s | 8.32s | 9.18s | 11.64s |
 
-## Direct paste and atomic markers
+All 12 measured requests completed and the persisted image count matched the target. Warm requests used roughly 1,664 / 4,096 / 7,680 cache-read tokens at 10 / 20 / 40 images. These are single-run measurements, not p50/p90 claims — the non-monotonic Sol and Terra rows are provider variance.
 
-On macOS, Windows, and WSL, `pi-image-view` automatically enables its editor. It reads image clipboard data itself and inserts `[Image #N]` directly, so Pi never renders a temporary clipboard path. Left/right navigation jumps across the whole marker, and Backspace/Delete removes it in one undoable action. Clipboard text still pastes as text.
-
-Native Linux automatically keeps Pi's default editor and uses paste-triggered burst scans because direct clipboard image reading is not yet available there. No environment-variable or wrapper configuration is required.
-
-## Editor compatibility
-
-Compatibility with `pi-zentui` is tracked in [Issue #1](https://github.com/alchemistklk/pi-image-view/issues/1) and is not considered fully fixed. The current tested workaround is to load `pi-image-view` before `pi-zentui`, allowing Zentui to wrap the image-view editor. The reverse order may cause editor/status reconciliation instability.
-
-## Terminal support
-
-Pure-text references work in every Pi-supported terminal. Clickable links require terminal OSC 8 support; on macOS, use the terminal's normal link modifier such as `Command`-click.
-
-Inline draft thumbnails require Kitty 0.28 or newer. In tmux 3.3a or newer, add:
-
-```tmux
-set -g allow-passthrough all
-```
-
-Other terminals receive a text-only preview label while keeping compact references and links where OSC 8 is supported.
-
-## Supported formats and paths
-
-PNG, JPEG/JPG, GIF (first frame), and WebP are supported. Files larger than 50 MB are ignored. Paths may be Unix absolute/home/relative paths, Windows drive paths, UNC paths, or quoted paths with spaces. Windows drive paths are translated to `/mnt/<drive>/...` when running under WSL.
+A representative source image went from 2114×1040 / 867,917 bytes to 480×236 / 125,889 bytes, about an 85% reduction.
 
 ## Development
 
 ```bash
 npm install
-npm test
-pi -e .
+npm test        # vitest
+pi -e .         # load the working tree into a Pi run
 ```
+
+`peerDependencies` are provided by the Pi runtime through jiti and must not be installed locally — see the note in `.npmrc`.
 
 ## Credits
 
