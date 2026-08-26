@@ -33,82 +33,76 @@ function contextHarness() {
 	return { handlers, command: commands.get("pi-image-view")!, ctx, notify };
 }
 
-describe("model image context filtering", () => {
-	it("defaults to all images while stripping only internal marker targets", () => {
+describe("model image context clearing", () => {
+	it("defaults to all images while stripping only local marker targets", () => {
 		const messages = [
 			{ role: "user", content: `[[Image #1]](${internal}) and [docs](https://example.com)` },
-			{ role: "user", content: [{ type: "text", text: `[[Image #2]](${internal}) [visible](https://pi.dev)` }, image("USER")] },
-			{ role: "toolResult", content: [image("TOOL")] },
+			{ role: "user", content: [{ type: "text", text: `[[Image #2]](${internal})` }, image("USER")] },
 		];
-
 		expect(sanitizeModelMessages(messages)).toEqual([
 			{ role: "user", content: "[Image #1] and [docs](https://example.com)" },
-			{ role: "user", content: [{ type: "text", text: "[Image #2] [visible](https://pi.dev)" }, image("USER")] },
-			{ role: "toolResult", content: [image("TOOL")] },
+			{ role: "user", content: [{ type: "text", text: "[Image #2]" }, image("USER")] },
 		]);
 	});
 
-	it("latest keeps user and tool-result images only in the newest image-bearing user turn", () => {
+	it("removes only images before the clear boundary without mutating input", () => {
 		const messages = [
-			{ role: "user", content: [{ type: "text", text: "old" }, image("OLD_USER")] },
-			{ role: "toolResult", content: [image("OLD_TOOL")] },
+			{ role: "user", content: [image("OLD")] },
 			{ role: "assistant", content: [{ type: "text", text: "done" }] },
-			{ role: "user", content: [{ type: "text", text: "inspect screenshot" }] },
-			{ role: "assistant", content: [{ type: "text", text: "calling tool" }] },
-			{ role: "toolResult", content: [image("NEW_TOOL")] },
-			{ role: "user", content: [{ type: "text", text: "continue without another image" }] },
-		];
-
-		const result = sanitizeModelMessages(messages, "latest");
-		expect(result[0]!.content).toEqual([{ type: "text", text: "old" }]);
-		expect(result[1]!.content).toEqual([{ type: "text", text: "[Image omitted from model context]" }]);
-		expect(result[5]!.content).toEqual([image("NEW_TOOL")]);
-	});
-
-	it("none removes every image, adds placeholders for image-only messages, and does not mutate input", () => {
-		const messages = [
-			{ role: "user", content: [image("USER")] },
-			{ role: "toolResult", content: [{ type: "text", text: "result" }, image("TOOL")] },
+			{ role: "user", content: [{ type: "text", text: "new" }, image("NEW")] },
 		];
 		const snapshot = structuredClone(messages);
-
-		const result = sanitizeModelMessages(messages, "none");
-
-		expect(result).toEqual([
+		expect(sanitizeModelMessages(messages, 2)).toEqual([
 			{ role: "user", content: [{ type: "text", text: "[Image omitted from model context]" }] },
-			{ role: "toolResult", content: [{ type: "text", text: "result" }] },
+			messages[1],
+			messages[2],
 		]);
 		expect(messages).toEqual(snapshot);
-		expect(result).not.toBe(messages);
 	});
-});
 
-describe("/pi-image-view", () => {
-	it("shows status, validates arguments, updates the current session mode, and resets on session start", async () => {
+	it("clear drops existing images but preserves images attached afterward", () => {
 		const { handlers, command, ctx, notify } = contextHarness();
-		const event = { messages: [{ role: "user", content: [image("ONE")] }] };
+		const oldContext = [
+			{ role: "user", content: [image("OLD")] },
+			{ role: "assistant", content: [{ type: "text", text: "done" }] },
+		];
+		handlers.get("context")!({ messages: oldContext });
+		command.handler("clear", ctx);
+		const nextContext = [...oldContext, { role: "user", content: [{ type: "text", text: "new" }, image("NEW")] }];
+		const result = handlers.get("context")!({ messages: nextContext }).messages;
 
+		expect(notify).toHaveBeenLastCalledWith("Existing images cleared from model context", "info");
+		expect(result[0].content).toEqual([{ type: "text", text: "[Image omitted from model context]" }]);
+		expect(result[2].content).toEqual([{ type: "text", text: "new" }, image("NEW")]);
+	});
+
+	it("clear before the first context keeps the next user turn", () => {
+		const { handlers, command, ctx } = contextHarness();
+		command.handler("clear", ctx);
+		const result = handlers.get("context")!({ messages: [
+			{ role: "user", content: [image("OLD")] },
+			{ role: "assistant", content: [{ type: "text", text: "done" }] },
+			{ role: "user", content: [{ type: "text", text: "current" }, image("CURRENT")] },
+		] }).messages;
+		expect(result[0].content).toEqual([{ type: "text", text: "[Image omitted from model context]" }]);
+		expect(result[2].content).toEqual([{ type: "text", text: "current" }, image("CURRENT")]);
+	});
+
+	it("accepts only clear and resets the boundary on session start", async () => {
+		const { handlers, command, ctx, notify } = contextHarness();
+		const old = [{ role: "user", content: [image("OLD")] }];
+		handlers.get("context")!({ messages: old });
 		command.handler("", ctx);
-		command.handler("bogus", ctx);
-		command.handler("none", ctx);
-		expect(notify.mock.calls).toEqual([
-			["Image context mode: all", "info"],
-			["Usage: /pi-image-view [status|all|latest|none]", "error"],
-			["Image context mode: none", "info"],
+		command.handler("all", ctx);
+		command.handler("clear", ctx);
+		expect(notify.mock.calls.slice(0, 2)).toEqual([
+			["Usage: /pi-image-view clear", "error"],
+			["Usage: /pi-image-view clear", "error"],
 		]);
-		expect(handlers.get("context")!(event).messages[0].content).toEqual([
+		expect(handlers.get("context")!({ messages: old }).messages[0].content).toEqual([
 			{ type: "text", text: "[Image omitted from model context]" },
 		]);
-
 		await handlers.get("session_start")!(undefined, ctx);
-		command.handler("status", ctx);
-		expect(notify).toHaveBeenLastCalledWith("Image context mode: all", "info");
-		expect(handlers.get("context")!(event).messages[0].content).toEqual([image("ONE")]);
-	});
-
-	it.each(["all", "latest", "none"])("accepts %s", (mode) => {
-		const { command, ctx, notify } = contextHarness();
-		command.handler(mode, ctx);
-		expect(notify).toHaveBeenLastCalledWith(`Image context mode: ${mode}`, "info");
+		expect(handlers.get("context")!({ messages: old }).messages[0].content).toEqual([image("OLD")]);
 	});
 });

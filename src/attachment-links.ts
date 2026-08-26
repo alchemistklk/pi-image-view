@@ -55,8 +55,6 @@ export function renderImageMarkerLinks(
 		);
 }
 
-export type ImageContextMode = "all" | "latest" | "none";
-
 const OMITTED_IMAGE_PLACEHOLDER = "[Image omitted from model context]";
 
 type ModelMessage = {
@@ -68,28 +66,11 @@ function isImageBlock(block: unknown): boolean {
 	return Boolean(block && typeof block === "object" && "type" in block && block.type === "image");
 }
 
-function hasImageContent(message: ModelMessage): boolean {
-	return Array.isArray(message.content) && message.content.some(isImageBlock);
-}
-
-function latestImageBearingTurn(messages: ModelMessage[]): { start: number; end: number } | undefined {
-	let end = messages.length;
-	for (let index = messages.length - 1; index >= 0; index -= 1) {
-		if (messages[index]?.role !== "user") continue;
-		if (messages.slice(index, end).some(hasImageContent)) {
-			return { start: index, end };
-		}
-		end = index;
-	}
-	return undefined;
-}
-
 /** Build model-facing copies without changing session messages or their content blocks. */
 export function sanitizeModelMessages<T extends ModelMessage>(
 	messages: T[],
-	mode: ImageContextMode = "all",
+	removeImagesBefore?: number,
 ): T[] {
-	const latestTurn = mode === "latest" ? latestImageBearingTurn(messages) : undefined;
 	return messages.map((message, messageIndex) => {
 		if (typeof message.content === "string") {
 			const content = stripImageMarkerLinks(message.content);
@@ -97,12 +78,7 @@ export function sanitizeModelMessages<T extends ModelMessage>(
 		}
 		if (!Array.isArray(message.content)) return message;
 
-		const keepImages = mode === "all" || (
-			mode === "latest" &&
-			latestTurn !== undefined &&
-			messageIndex >= latestTurn.start &&
-			messageIndex < latestTurn.end
-		);
+		const keepImages = removeImagesBefore === undefined || messageIndex >= removeImagesBefore;
 		let changed = false;
 		let removedImage = false;
 		const content = message.content.flatMap((block) => {

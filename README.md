@@ -55,20 +55,17 @@ Then paste an image with `Ctrl+V` (`Alt+V` on Windows/WSL). If Pi is already run
 
 The original `/var/folders/...` clipboard path is never sent to the model. Normally the submitted bytes are a 480px PNG thumbnail. If Pi cannot resize or convert the image, the extension fails open to the source image so the attachment is not lost; the persistent blob then contains that submitted fallback. The local blob path is stored only as history display metadata and is stripped from model-facing context.
 
-## Model image context
+## Clear existing model image context
 
-Use `/pi-image-view` to inspect or change which existing image attachments are included in model calls:
+When a long session has accumulated many images, clear the images that already exist from subsequent model requests:
 
 ```text
-/pi-image-view status
-/pi-image-view all
-/pi-image-view latest
-/pi-image-view none
+/pi-image-view clear
 ```
 
-The default is `all`. `latest` keeps images from only the newest image-bearing user turn, including tool-result images from that turn, while `none` removes every image attachment. The setting is in-memory and applies only to the current extension session; starting another session resets it to `all`.
+`clear` is non-destructive: session history, clickable references, entries, and stored blobs remain unchanged. Images attached after the command continue to be sent normally. Starting another session or reloading the extension resets the clear boundary.
 
-All modes strip local file and internal image-link targets before model calls. These transformations affect only the model-facing copy: session history, entries, and stored blobs remain unchanged. Image-only messages receive a short text placeholder when their attachment is omitted.
+The extension always strips local file and internal image-link targets before model calls. Image-only historical messages receive a short text placeholder when their attachment is omitted.
 
 ## Blob lifecycle
 

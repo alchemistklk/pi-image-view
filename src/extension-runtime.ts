@@ -4,7 +4,6 @@ import {
 	createImageMarkerLink,
 	renderImageMarkerLinks,
 	sanitizeModelMessages,
-	type ImageContextMode,
 } from "./attachment-links.ts";
 import { ImageGallery, type GalleryImage } from "./image-gallery.ts";
 import { extractImagePaths } from "./image-paths.ts";
@@ -110,28 +109,45 @@ export function registerImagePreviewExtension(
 		);
 	}
 
-	let contextMode: ImageContextMode = "all";
+	let clearBeforeIndex: number | undefined;
+	let clearOnNextContext = false;
+	let lastContextMessageCount = 0;
 
 	pi.registerCommand?.("pi-image-view", {
-		description: "Control which images are included in model context (all, latest, none)",
+		description: "Clear existing images from subsequent model context",
 		handler: (args, ctx) => {
-			const requested = args.trim();
-			if (requested === "" || requested === "status") {
-				ctx.ui.notify(`Image context mode: ${contextMode}`, "info");
+			if (args.trim() !== "clear") {
+				ctx.ui.notify("Usage: /pi-image-view clear", "error");
 				return;
 			}
-			if (requested !== "all" && requested !== "latest" && requested !== "none") {
-				ctx.ui.notify("Usage: /pi-image-view [status|all|latest|none]", "error");
-				return;
+			if (lastContextMessageCount > 0) {
+				clearBeforeIndex = lastContextMessageCount;
+				clearOnNextContext = false;
+			} else {
+				clearOnNextContext = true;
 			}
-			contextMode = requested;
-			ctx.ui.notify(`Image context mode: ${contextMode}`, "info");
+			ctx.ui.notify("Existing images cleared from model context", "info");
 		},
 	});
 
-	pi.on("context", (event: { messages: Array<{ role?: unknown; content?: unknown }> }) => ({
-		messages: sanitizeModelMessages(event.messages, contextMode),
-	}));
+	pi.on("context", (event: { messages: Array<{ role?: unknown; content?: unknown }> }) => {
+		if (clearBeforeIndex !== undefined && event.messages.length < clearBeforeIndex) {
+			clearBeforeIndex = 0;
+		}
+		if (clearOnNextContext) {
+			let latestUserIndex = -1;
+			for (let index = event.messages.length - 1; index >= 0; index -= 1) {
+				if (event.messages[index]?.role === "user") {
+					latestUserIndex = index;
+					break;
+				}
+			}
+			clearBeforeIndex = latestUserIndex >= 0 ? latestUserIndex : event.messages.length;
+			clearOnNextContext = false;
+		}
+		lastContextMessageCount = event.messages.length;
+		return { messages: sanitizeModelMessages(event.messages, clearBeforeIndex) };
+	});
 
 	let tracked: Map<string, TrackedImage> = new Map();
 	let gallery: ImageGallery | null = null;
@@ -349,7 +365,9 @@ export function registerImagePreviewExtension(
 	};
 
 	pi.on("session_start", async (_event: unknown, ctx: CtxLike) => {
-		contextMode = "all";
+		clearBeforeIndex = undefined;
+		clearOnNextContext = false;
+		lastContextMessageCount = 0;
 		latestCtx = ctx;
 		resetDraft(ctx);
 		if (ctx.hasUI !== false && ctx.mode !== "print" && ctx.mode !== "json") {
