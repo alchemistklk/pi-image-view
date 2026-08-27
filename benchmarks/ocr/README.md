@@ -32,7 +32,7 @@ python3 benchmarks/ocr/summarize_results.py
 
 Each trial starts an isolated Pi JSON-mode process with no extensions, context files, skills, prompt templates, or saved session. The runner parses only the finalized assistant `message_end`, records provider usage/cost and wall-clock latency, and scores exact target recovery plus character error rate.
 
-Use `--samples ui` or `--variants preview480` for a smoke test. The default matrix makes paid model calls.
+Use `--samples ui` or `--variants preview480` for a smoke test. The runner refuses paid calls from a dirty worktree so the result is attributable to one commit; add `--allow-dirty` only for a clearly non-attested local smoke run. The default matrix makes paid model calls and checkpoints every completed trial atomically.
 
 ## Decision run
 

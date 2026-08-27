@@ -81,4 +81,15 @@ class BenchmarkTests(unittest.TestCase):
         finally:
             image.write_bytes(original)
 
+    def test_duplicate_repeat_cannot_replace_missing_matrix_key(self):
+        base = {"jobIndex": 0, "ok": True, "formatValid": True, "model": "m", "sample": "s", "repeat": 1, "expectedCount": 1, "strictExactItems": 1, "strictExactItemRate": 1, "strictCharacterErrorRate": 0, "exactItems": 1, "exactItemRate": 1, "characterErrorRate": 0, "bytes": 10, "elapsedSeconds": 1, "usage": {"input": 1, "cacheRead": 0, "cost": {"total": 0.01}}}
+        results = [{**base, "variant": "source"}, {**base, "jobIndex": 1, "variant": "source"}, {**base, "jobIndex": 2, "variant": "detail1280"}]
+        payload = {"schemaVersion": 2, "status": "complete", "createdAt": "now", "models": ["m"], "samples": ["s"], "variants": ["source", "preview480", "detail1280"], "repeats": 1, "concurrency": 1, "seed": 1, "requestedTrials": 3, "results": results}
+        with tempfile.TemporaryDirectory() as temp:
+            source = Path(temp) / "input.json"; output = Path(temp) / "report.md"; source.write_text(json.dumps(payload))
+            subprocess.run(["python3", str(ROOT / "benchmarks/ocr/summarize_results.py"), "--input", str(source), "--output", str(output)], cwd=ROOT, check=True)
+            report = output.read_text()
+            self.assertIn("exact matrix keys **no**", report)
+            self.assertIn("Inconclusive", report)
+
 if __name__ == "__main__": unittest.main()
