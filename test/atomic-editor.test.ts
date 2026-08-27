@@ -27,7 +27,8 @@ vi.mock("@earendil-works/pi-coding-agent", () => {
 	return { CustomEditor };
 });
 
-import { createAtomicMarkerEditor, ImageViewAtomicEditor } from "../src/atomic-editor.ts";
+import { createAtomicMarkerEditor, enhanceAtomicMarkerEditor, ImageViewAtomicEditor } from "../src/atomic-editor.ts";
+import { CustomEditor } from "@earendil-works/pi-coding-agent";
 
 const keys = {
 	matches(data: string, action: string) {
@@ -55,6 +56,29 @@ function hostPaste(editor: any, fallback: () => void = () => {}): () => void {
 	return editor.onPasteImage;
 }
 
+/** An undecorated host editor, so the decorator path is actually exercised. */
+function makeBareEditor(): any {
+	return new (CustomEditor as any)({ requestRender: vi.fn() });
+}
+
+/**
+ * Mirrors pi-zentui's `WrappedPolishedEditor`: a wrapper that owns no editing
+ * state and forwards the host callbacks to the editor it wraps through
+ * prototype accessors.
+ */
+class ForwardingWrapper {
+	constructor(private readonly base: any) {}
+	handleInput(data: string) { this.base.handleInput(data); }
+	getText() { return this.base.getText(); }
+	getLines() { return this.base.getLines(); }
+	getCursor() { return this.base.getCursor(); }
+	get onSubmit() { return this.base.onSubmit; }
+	set onSubmit(value) { this.base.onSubmit = value; }
+	get onPasteImage() { return this.base.onPasteImage; }
+	set onPasteImage(value) { this.base.onPasteImage = value; }
+	get actionHandlers() { return this.base.actionHandlers; }
+}
+
 describe("atomic editor adapter", () => {
 	it("restores a whole-marker deletion through the host undo seam", () => {
 		const editor = makeEditor();
@@ -66,8 +90,9 @@ describe("atomic editor adapter", () => {
 		expect(editor.getText()).toBe("[Image #1]x");
 	});
 
-	it("enhances an existing editor instance in place", () => {
-		const base = makeEditor();
+	it("enhances an undecorated editor instance in place", () => {
+		const base = makeBareEditor();
+		expect(base[Symbol.for("pi-image-view.atomic-editor-installed")]).toBeUndefined();
 		base.state = { lines: ["[Image #1]x"], cursorLine: 0, cursorCol: 0 };
 		base.render = () => ["zentui-render"];
 		const enhanced = createAtomicMarkerEditor(
@@ -76,9 +101,45 @@ describe("atomic editor adapter", () => {
 			base,
 		) as any;
 		expect(enhanced).toBe(base);
+		expect(enhanced[Symbol.for("pi-image-view.atomic-editor-installed")]).toBe(true);
 		expect(enhanced.render()).toEqual(["zentui-render"]);
 		enhanced.handleInput("DELETE");
 		expect(enhanced.getText()).toBe("x");
+	});
+
+	it("declines a forwarding wrapper so host callbacks still reach the real editor", () => {
+		const inner = makeBareEditor();
+		const wrapper: any = new ForwardingWrapper(inner);
+		const returned = enhanceAtomicMarkerEditor(
+			wrapper, { requestRender: vi.fn() } as any, keys as any,
+			{ readClipboard: async () => ({ kind: "empty" }), attachImage: () => "[Image #1]" },
+		);
+
+		expect(returned).toBe(wrapper);
+		expect(wrapper[Symbol.for("pi-image-view.atomic-editor-installed")]).toBeUndefined();
+
+		// Pi assigns the callbacks on whatever it was handed.
+		const piSubmit = vi.fn();
+		wrapper.onSubmit = piSubmit;
+		inner.state = { lines: ["hello"], cursorLine: 0, cursorCol: 5 };
+		inner.submitValue();
+
+		// Shadowing the wrapper's forwarding accessor would strand this on the wrapper.
+		expect(inner.onSubmit).toBe(piSubmit);
+		expect(piSubmit).toHaveBeenCalledWith("hello");
+	});
+
+	it("still applies atomic behavior through a wrapper whose base is enhanced", () => {
+		const inner = makeEditor();
+		inner.state = { lines: ["[Image #1]x"], cursorLine: 0, cursorCol: 0 };
+		const wrapper: any = new ForwardingWrapper(inner);
+		enhanceAtomicMarkerEditor(
+			wrapper, { requestRender: vi.fn() } as any, keys as any,
+			{ readClipboard: async () => ({ kind: "empty" }), attachImage: () => "[Image #1]" },
+		);
+
+		wrapper.handleInput("DELETE");
+		expect(wrapper.getText()).toBe("x");
 	});
 
 	it("defers to the host when the undo snapshot seam is unavailable", () => {

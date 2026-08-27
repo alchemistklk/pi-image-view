@@ -490,6 +490,56 @@ describe("draft scan lifecycle", () => {
 		expect(ctx.ui.getEditorComponent()).toBeUndefined();
 	});
 
+	it("clears the editor instead of restoring a Zentui factory it still fronts", async () => {
+		const zentuiFactory = vi.fn() as any;
+		zentuiFactory[Symbol.for("pi-zentui.editor-factory")] = true;
+		const { handlers, ctx } = makeHarness({
+			readImageContentFromPathAsync: vi.fn(async () => null),
+			loadImageContentFromPath: vi.fn(async () => null),
+			createAtomicEditor: vi.fn(() => ({ kind: "atomic" })),
+		});
+		ctx.ui.setEditorComponent(zentuiFactory);
+		await handlers.get("session_start")!(undefined, ctx);
+		const composed = ctx.ui.getEditorComponent();
+		expect(composed).not.toBe(zentuiFactory);
+
+		// Image-view shuts down first, while its composed factory is still installed.
+		await handlers.get("session_shutdown")!(undefined, ctx);
+
+		// Restoring the Zentui factory would resurrect an editor Zentui is tearing down.
+		expect(ctx.ui.getEditorComponent()).toBeUndefined();
+	});
+
+	it("restores a displaced non-Zentui factory on shutdown", async () => {
+		const plainFactory = vi.fn() as any;
+		const { handlers, ctx } = makeHarness({
+			readImageContentFromPathAsync: vi.fn(async () => null),
+			loadImageContentFromPath: vi.fn(async () => null),
+			createAtomicEditor: vi.fn(() => ({ kind: "atomic" })),
+		});
+		ctx.ui.setEditorComponent(plainFactory);
+		await handlers.get("session_start")!(undefined, ctx);
+		await handlers.get("session_shutdown")!(undefined, ctx);
+
+		expect(ctx.ui.getEditorComponent()).toBe(plainFactory);
+	});
+
+	it("builds a standalone editor when the displaced factory throws", async () => {
+		const brokenFactory = vi.fn(() => { throw new Error("incompatible extension"); }) as any;
+		const createAtomicEditor = vi.fn(() => ({ kind: "atomic" }));
+		const { handlers, ctx } = makeHarness({
+			readImageContentFromPathAsync: vi.fn(async () => null),
+			loadImageContentFromPath: vi.fn(async () => null),
+			createAtomicEditor,
+		});
+		ctx.ui.setEditorComponent(brokenFactory);
+		await handlers.get("session_start")!(undefined, ctx);
+		const composed = ctx.ui.getEditorComponent() as any;
+
+		expect(() => composed("tui", "theme", "keys")).not.toThrow();
+		expect(createAtomicEditor).toHaveBeenCalledWith("tui", "theme", "keys", expect.any(Function), undefined);
+	});
+
 	it("removes its exposed base after a later-loaded Zentui wrapper shuts down", async () => {
 		vi.useFakeTimers();
 		try {

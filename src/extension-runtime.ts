@@ -483,7 +483,15 @@ export function registerImagePreviewExtension(
 				previousEditorFactory = ctx.ui.getEditorComponent?.();
 				const previous = previousEditorFactory;
 				installedEditorFactory = (tui, theme, keybindings) => {
-					const baseEditor = previous?.(tui, theme, keybindings);
+					// A displaced factory belongs to another extension. If it throws, build
+					// our own editor rather than leaving the session with no editor at all.
+					let baseEditor: unknown;
+					try {
+						baseEditor = previous?.(tui, theme, keybindings);
+					} catch (error) {
+						debugLog("Displaced editor factory failed; building a standalone editor", error);
+						baseEditor = undefined;
+					}
 					return deps.createAtomicEditor!(tui, theme, keybindings, attachClipboardImage, baseEditor && typeof baseEditor === "object" ? baseEditor : undefined);
 				};
 				for (const name of ["pi-zentui.editor-factory", "pi-zentui.editor-owner", "pi-zentui.editor-base-factory"] as const) {

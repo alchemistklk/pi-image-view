@@ -160,7 +160,7 @@ One of the attached images is not a PNG, which happens when PNG conversion fails
 
 ### Images stop working after installing `pi-zentui`
 
-`pi-image-view` composes with `pi-zentui` 0.21.0 in either package order. It enhances Zentui's editor instance without replacing its renderer and preserves Zentui's ownership metadata during reconciliation. If an older Zentui release is required, keep `pi-image-view` before `pi-zentui` as the compatibility fallback. Tracked in [Issue #1](https://github.com/alchemistklk/pi-image-view/issues/1).
+`pi-image-view` is **provisionally** compatible with `pi-zentui` 0.21.0 in either package order: it enhances an existing editor instance in place rather than replacing the renderer, and preserves Zentui's ownership metadata during reconciliation. This is covered by fixtures but has not yet been attested against a real Zentui install across reloads and session replacement, so keep loading `pi-image-view` **before** `pi-zentui` if you need a known-good order. Note that disabling Zentui's editor component also removes image-view's direct paste and atomic markers until reload, because Zentui owns the composed factory. Tracked in [Issue #1](https://github.com/alchemistklk/pi-image-view/issues/1), which stays open until the desktop matrix passes.
 
 ### A long session with many screenshots got slow
 

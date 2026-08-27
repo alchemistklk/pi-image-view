@@ -52,7 +52,20 @@ export function enhanceAtomicMarkerEditor<T extends object>(
 		typeof host.getCursor !== "function" ||
 		typeof host.getLines !== "function" ||
 		typeof host.getText !== "function"
-	) return editor;
+	) {
+		debugLog("Atomic markers skipped: editor is missing a required method");
+		return editor;
+	}
+	// Decorating a forwarding wrapper is unsafe in both directions. Its editing
+	// state lives on the wrapped editor, and the instance accessors installed
+	// below would shadow the wrapper's own forwarding accessors, so the host's
+	// `onSubmit`/`onPasteImage` assignments would stop reaching the real editor.
+	// Declining leaves the wrapper delegating to a base that this decorator has
+	// usually already enhanced, which keeps every behavior working.
+	if (!Object.hasOwn(host, "state") || !Array.isArray(host.state?.lines)) {
+		debugLog("Atomic markers skipped: editor does not own its editing state");
+		return editor;
+	}
 
 	Object.defineProperty(host, ATOMIC_EDITOR_INSTALLED, { value: true });
 	host.segment = (text, mode = "grapheme") =>

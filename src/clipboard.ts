@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { constants, existsSync } from "node:fs";
-import { access, readFile, unlink } from "node:fs/promises";
+import { access, readFile, stat, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { promisify } from "node:util";
@@ -48,8 +48,18 @@ export function supportsDirectClipboard(env: NodeJS.ProcessEnv = process.env, pl
 	return platform === "darwin" || platform === "win32" || Boolean(env.WSL_DISTRO_NAME || env.WSL_INTEROP);
 }
 
+/**
+ * `access(path, X_OK)` also succeeds for a directory, so a directory named
+ * `xclip` on PATH would register as the executable. Require a regular file.
+ */
+async function executableAt(path: string, mode?: number): Promise<void> {
+	const stats = await stat(path);
+	if (!stats.isFile()) throw new Error(`${path} is not a regular file`);
+	await access(path, mode ?? constants.X_OK);
+}
+
 async function executableExists(command: string, env: NodeJS.ProcessEnv, deps: ClipboardDeps): Promise<boolean> {
-	const checkAccess = deps.access ?? access;
+	const checkAccess = deps.access ?? executableAt;
 	const directories = (env.PATH ?? "").split(delimiter).filter(Boolean);
 	for (const directory of directories) {
 		try {
@@ -60,6 +70,31 @@ async function executableExists(command: string, env: NodeJS.ProcessEnv, deps: C
 		}
 	}
 	return false;
+}
+
+let backendCache: { signature: string; backend: LinuxBackend | undefined } | undefined;
+
+function backendSignature(env: NodeJS.ProcessEnv): string {
+	return [env.PATH ?? "", env.WAYLAND_DISPLAY ?? "", env.DISPLAY ?? ""].join("\u0000");
+}
+
+/**
+ * Probing PATH costs one filesystem call per directory, and a paste should not
+ * pay for it on every keystroke. Only the real-filesystem probe is cached;
+ * injected dependencies stay deterministic per call.
+ */
+async function resolveLinuxBackend(env: NodeJS.ProcessEnv, deps: ClipboardDeps): Promise<LinuxBackend | undefined> {
+	if (deps.access || deps.execFile) return linuxBackend(env, deps);
+	const signature = backendSignature(env);
+	if (backendCache?.signature === signature) return backendCache.backend;
+	const backend = await linuxBackend(env, deps);
+	backendCache = { signature, backend };
+	return backend;
+}
+
+/** Drops the cached probe so a vanished command is rediscovered on the next read. */
+function forgetLinuxBackend(): void {
+	backendCache = undefined;
 }
 
 async function linuxBackend(env: NodeJS.ProcessEnv, deps: ClipboardDeps): Promise<LinuxBackend | undefined> {
@@ -78,7 +113,7 @@ export async function canReadDirectClipboard(
 	deps: ClipboardDeps = {},
 ): Promise<boolean> {
 	if (supportsDirectClipboard(env, platform)) return true;
-	return platform === "linux" && Boolean(await linuxBackend(env, deps));
+	return platform === "linux" && Boolean(await resolveLinuxBackend(env, deps));
 }
 
 async function macImage(): Promise<ImageContent | undefined> {
@@ -197,8 +232,12 @@ export async function readDirectClipboard(
 	deps: ClipboardDeps = {},
 ): Promise<ClipboardPayload> {
 	if (platform === "linux" && !supportsDirectClipboard(env, platform)) {
-		const backend = await linuxBackend(env, deps);
-		return backend ? linuxClipboard(backend, deps) : { kind: "empty" };
+		const backend = await resolveLinuxBackend(env, deps);
+		if (!backend) return { kind: "empty" };
+		const payload = await linuxClipboard(backend, deps);
+		// A failed read can mean the command was uninstalled since the probe.
+		if (payload.kind === "empty") forgetLinuxBackend();
+		return payload;
 	}
 	if (!supportsDirectClipboard(env, platform)) return { kind: "empty" };
 	const image = platform === "darwin" ? await macImage() : await windowsImage(platform);
