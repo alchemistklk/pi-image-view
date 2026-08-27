@@ -202,6 +202,8 @@ export function registerImagePreviewExtension(
 	type EditorFactory = (tui: unknown, theme: unknown, keybindings: unknown) => unknown;
 	let installedEditorFactory: EditorFactory | undefined;
 	let previousEditorFactory: EditorFactory | undefined;
+	/** Set once a displaced factory throws, so shutdown never hands it back. */
+	let previousEditorFactoryFailed = false;
 	let tracked: Map<string, TrackedImage> = new Map();
 	let gallery: ImageGallery | null = null;
 	let pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -481,6 +483,7 @@ export function registerImagePreviewExtension(
 			if (generation !== sessionGeneration || latestCtx !== ctx) return;
 			if (supported) {
 				previousEditorFactory = ctx.ui.getEditorComponent?.();
+				previousEditorFactoryFailed = false;
 				const previous = previousEditorFactory;
 				installedEditorFactory = (tui, theme, keybindings) => {
 					// A displaced factory belongs to another extension. If it throws, build
@@ -490,6 +493,7 @@ export function registerImagePreviewExtension(
 						baseEditor = previous?.(tui, theme, keybindings);
 					} catch (error) {
 						debugLog("Displaced editor factory failed; building a standalone editor", error);
+						previousEditorFactoryFailed = true;
 						baseEditor = undefined;
 					}
 					return deps.createAtomicEditor!(tui, theme, keybindings, attachClipboardImage, baseEditor && typeof baseEditor === "object" ? baseEditor : undefined);
@@ -516,21 +520,34 @@ export function registerImagePreviewExtension(
 	pi.on("session_shutdown", (_event: unknown, ctx: CtxLike) => {
 		cleanup();
 		const installed = installedEditorFactory;
-		const previous = previousEditorFactory;
+		const previousIsZentui = Boolean(previousEditorFactory && (previousEditorFactory as unknown as Record<symbol, unknown>)[Symbol.for("pi-zentui.editor-factory")]);
+		// Zentui tears its own editor down, and a factory that already threw would
+		// throw again: `setEditorComponent` invokes the factory synchronously, so
+		// either one would break teardown rather than restore anything.
+		const previous = previousIsZentui || previousEditorFactoryFailed ? undefined : previousEditorFactory;
 		const ui = ctx.ui;
+		/** Restoring runs foreign code, so never let it escape the shutdown handler. */
+		const restore = (factory: EditorFactory | undefined): void => {
+			try {
+				ui.setEditorComponent?.(factory);
+			} catch (error) {
+				debugLog("Restoring the displaced editor factory failed; clearing it", error);
+				try { ui.setEditorComponent?.(undefined); } catch { /* disposed UI */ }
+			}
+		};
 		if (installed && ui.getEditorComponent?.() === installed) {
-			const previousIsZentui = Boolean(previous && (previous as unknown as Record<symbol, unknown>)[Symbol.for("pi-zentui.editor-factory")]);
-			ui.setEditorComponent?.(previousIsZentui ? undefined : previous);
+			restore(previous);
 		} else if (installed) {
 			const timer = setTimeout(() => {
 				try {
-					if (ui.getEditorComponent?.() === installed) ui.setEditorComponent?.(previous);
+					if (ui.getEditorComponent?.() === installed) restore(previous);
 				} catch { /* disposed UI */ }
 			}, 0);
 			timer.unref?.();
 		}
 		installedEditorFactory = undefined;
 		previousEditorFactory = undefined;
+		previousEditorFactoryFailed = false;
 	});
 
 	pi.on("tool_result", async (event: ToolResultEvent, ctx: CtxLike) => {

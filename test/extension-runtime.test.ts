@@ -540,6 +540,29 @@ describe("draft scan lifecycle", () => {
 		expect(createAtomicEditor).toHaveBeenCalledWith("tui", "theme", "keys", expect.any(Function), undefined);
 	});
 
+	it("does not restore a displaced factory that failed at startup", async () => {
+		const brokenFactory = vi.fn(() => { throw new Error("incompatible extension"); }) as any;
+		const { handlers, ctx } = makeHarness({
+			readImageContentFromPathAsync: vi.fn(async () => null),
+			loadImageContentFromPath: vi.fn(async () => null),
+			createAtomicEditor: vi.fn(() => ({ kind: "atomic" })),
+		});
+		ctx.ui.setEditorComponent(brokenFactory);
+		await handlers.get("session_start")!(undefined, ctx);
+		(ctx.ui.getEditorComponent() as any)("tui", "theme", "keys");
+
+		// Pi's setEditorComponent invokes the factory synchronously, so restoring a
+		// factory that throws would take down session teardown.
+		const store = ctx.ui.setEditorComponent;
+		ctx.ui.setEditorComponent = vi.fn((factory?: (...args: any[]) => unknown) => {
+			factory?.("tui", "theme", "keys");
+			return store(factory);
+		});
+
+		expect(() => handlers.get("session_shutdown")!(undefined, ctx)).not.toThrow();
+		expect(ctx.ui.getEditorComponent()).toBeUndefined();
+	});
+
 	it("removes its exposed base after a later-loaded Zentui wrapper shuts down", async () => {
 		vi.useFakeTimers();
 		try {

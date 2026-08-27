@@ -72,7 +72,7 @@ async function executableExists(command: string, env: NodeJS.ProcessEnv, deps: C
 	return false;
 }
 
-let backendCache: { signature: string; backend: LinuxBackend | undefined } | undefined;
+let backendCache: { signature: string; backend: LinuxBackend } | undefined;
 
 function backendSignature(env: NodeJS.ProcessEnv): string {
 	return [env.PATH ?? "", env.WAYLAND_DISPLAY ?? "", env.DISPLAY ?? ""].join("\u0000");
@@ -80,15 +80,18 @@ function backendSignature(env: NodeJS.ProcessEnv): string {
 
 /**
  * Probing PATH costs one filesystem call per directory, and a paste should not
- * pay for it on every keystroke. Only the real-filesystem probe is cached;
- * injected dependencies stay deterministic per call.
+ * pay for it on every keystroke. Only a successful probe is cached: caching a
+ * negative result would keep direct paste disabled for the rest of the process
+ * even after the user installs `wl-paste`. A miss costs one scan per session
+ * start, because without a backend this module never handles a paste at all.
+ * Injected dependencies bypass the cache so tests stay deterministic.
  */
 async function resolveLinuxBackend(env: NodeJS.ProcessEnv, deps: ClipboardDeps): Promise<LinuxBackend | undefined> {
 	if (deps.access || deps.execFile) return linuxBackend(env, deps);
 	const signature = backendSignature(env);
 	if (backendCache?.signature === signature) return backendCache.backend;
 	const backend = await linuxBackend(env, deps);
-	backendCache = { signature, backend };
+	backendCache = backend ? { signature, backend } : undefined;
 	return backend;
 }
 
