@@ -51,6 +51,7 @@ type CtxLike = {
 	cwd: string;
 	hasUI?: boolean;
 	mode?: "tui" | "rpc" | "json" | "print";
+	sessionManager?: { getBranch(): readonly unknown[] };
 	isIdle(): boolean;
 	ui: {
 		getEditorComponent?(): ((tui: unknown, theme: unknown, keybindings: unknown) => unknown) | undefined;
@@ -94,6 +95,39 @@ const IMAGE_PLACEHOLDER_RE = /\[Image #\d+\]/g;
 
 function placeholdersIn(text: string): Set<string> {
 	return new Set(text.match(IMAGE_PLACEHOLDER_RE) ?? []);
+}
+
+function highestImageNumberInText(text: string): number {
+	let highest = 0;
+	for (const match of text.matchAll(/\[Image #(\d+)\]/g)) {
+		const value = Number(match[1]);
+		if (Number.isSafeInteger(value)) highest = Math.max(highest, value);
+	}
+	return highest;
+}
+
+function highestImageNumberInContent(content: unknown): number {
+	if (typeof content === "string") return highestImageNumberInText(content);
+	if (!Array.isArray(content)) return 0;
+	return content.reduce((highest, part) => {
+		if (typeof part === "string") return Math.max(highest, highestImageNumberInText(part));
+		if (!part || typeof part !== "object") return highest;
+		const text = (part as { text?: unknown }).text;
+		return typeof text === "string"
+			? Math.max(highest, highestImageNumberInText(text))
+			: highest;
+	}, 0);
+}
+
+export function nextImageNumberForBranch(entries: readonly unknown[]): number {
+	let highest = 0;
+	for (const entry of entries) {
+		if (!entry || typeof entry !== "object") continue;
+		const candidate = entry as { type?: unknown; message?: { role?: unknown; content?: unknown } };
+		if (candidate.type !== "message" || candidate.message?.role !== "user") continue;
+		highest = Math.max(highest, highestImageNumberInContent(candidate.message.content));
+	}
+	return highest + 1;
 }
 
 /** Produce a label from an image path — just the filename. */
@@ -181,8 +215,18 @@ export function registerImagePreviewExtension(
 	// ── Helpers ────────────────────────────────────────────
 
 
+	function allocatePlaceholder(existingText = "", existing = tracked): string {
+		let placeholder: string;
+		do {
+			placeholder = `[Image #${nextPlaceholderNumber++}]`;
+		} while (existingText.includes(placeholder) || existing.has(placeholder));
+		return placeholder;
+	}
+
 	function attachClipboardImage(image: ImageContent): string {
-		const placeholder = `[Image #${nextPlaceholderNumber++}]`;
+		let editorText = "";
+		try { editorText = latestCtx?.ui.getEditorText() ?? ""; } catch { /* editor unavailable during teardown */ }
+		const placeholder = allocatePlaceholder(editorText);
 		const extension = image.mimeType === "image/jpeg" ? "jpg" : image.mimeType.split("/")[1] || "png";
 		const entry: TrackedImage = {
 			filePath: `clipboard.${extension}`,
@@ -263,7 +307,6 @@ export function registerImagePreviewExtension(
 			gallery = null;
 		}
 		tracked = new Map();
-		nextPlaceholderNumber = 1;
 		scanGeneration += 1;
 		lastScannedText = undefined;
 		failedScanText = undefined;
@@ -319,10 +362,7 @@ export function registerImagePreviewExtension(
 					continue;
 				}
 
-				let placeholder: string;
-				do {
-					placeholder = `[Image #${nextPlaceholderNumber++}]`;
-				} while (renderedText.includes(placeholder) || nextTracked.has(placeholder));
+				const placeholder = allocatePlaceholder(renderedText, nextTracked);
 
 				const entry: TrackedImage = {
 					filePath,
@@ -421,6 +461,7 @@ export function registerImagePreviewExtension(
 		lastContextMessageCount = 0;
 		latestCtx = ctx;
 		resetDraft(ctx);
+		nextPlaceholderNumber = nextImageNumberForBranch(ctx.sessionManager?.getBranch() ?? []);
 		if (deps.createAtomicEditor && ctx.ui.setEditorComponent) {
 			previousEditorFactory = ctx.ui.getEditorComponent?.();
 			installedEditorFactory = (tui, theme, keybindings) =>
@@ -484,10 +525,7 @@ export function registerImagePreviewExtension(
 		for (const { raw, path: filePath } of detectedPaths) {
 			const image = await deps.readImageContentFromPathAsync(filePath);
 			if (!image) continue;
-			let placeholder: string;
-			do {
-				placeholder = `[Image #${nextPlaceholderNumber++}]`;
-			} while (fullText.includes(placeholder) || tracked.has(placeholder));
+			const placeholder = allocatePlaceholder(fullText);
 			candidates.push({
 				token: raw,
 				index: fullText.indexOf(raw),

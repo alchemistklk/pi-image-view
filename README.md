@@ -53,7 +53,7 @@ Paste an image with `Ctrl+V` (`Alt+V` on Windows and WSL). If Pi is already runn
 
 | Action | Key | Behavior |
 | --- | --- | --- |
-| Paste image | `Ctrl+V` / `Alt+V` | Inserts `[Image #N]` directly on macOS, Windows, WSL. No temporary path is ever displayed. |
+| Paste image | `Ctrl+V` / `Alt+V` | Inserts `[Image #N]` directly on macOS, Windows, WSL. `N` increases across turns and resumes from the active session branch. No temporary path is ever displayed. |
 | Paste text | `Ctrl+V` / `Alt+V` | Unchanged — text pastes as text. |
 | Drag & drop a file | — | The dropped path is detected and replaced within ~240ms. |
 | Move across a marker | `←` / `→` | Jumps the whole `[Image #N]` marker, not character by character. |
