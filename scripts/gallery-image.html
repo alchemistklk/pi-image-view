@@ -1,0 +1,153 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  :root{
+    --bg:#080b12; --edge:#1e2637; --ink:#eef2f9; --dim:#8f9cb3; --faint:#5d6a80;
+    --blue:#5fa8ff; --marker:#7cc4ff; --red:#f2766b; --green:#48c98a;
+    --mono:"SF Mono","JetBrains Mono","DejaVu Sans Mono",ui-monospace,Menlo,Consolas,monospace;
+    --sans:-apple-system,"SF Pro Display","Inter","Helvetica Neue",system-ui,"DejaVu Sans",Arial,sans-serif;
+  }
+  html,body{width:1600px;height:900px;background:var(--bg);font-family:var(--sans);
+    -webkit-font-smoothing:antialiased}
+  body{position:relative;overflow:hidden;padding:44px 60px 0}
+  .glow{position:absolute;width:1500px;height:720px;left:110px;top:-450px;
+    background:radial-gradient(ellipse at center,rgba(51,110,196,.30),transparent 62%);filter:blur(8px)}
+  .grid{position:absolute;inset:0;opacity:.5;
+    background-image:linear-gradient(rgba(255,255,255,.022) 1px,transparent 1px),
+                     linear-gradient(90deg,rgba(255,255,255,.022) 1px,transparent 1px);
+    background-size:80px 80px;
+    -webkit-mask-image:radial-gradient(ellipse 1050px 600px at 44% 10%,#000 34%,transparent 76%)}
+  .wrap{position:relative}
+
+  .badge{display:inline-flex;align-items:center;gap:9px;padding:7px 16px 7px 13px;border-radius:999px;
+    background:rgba(45,86,152,.24);border:1px solid rgba(96,150,226,.42);
+    font-family:var(--mono);font-size:12px;letter-spacing:.16em;color:#9fc6ff}
+  .badge i{width:6px;height:6px;border-radius:50%;background:var(--blue);
+    box-shadow:0 0 10px 2px rgba(95,168,255,.75)}
+  h1{margin:20px 0 0;font-size:52px;line-height:1;letter-spacing:-.032em;color:var(--ink);font-weight:600}
+  .sub{margin-top:13px;font-size:20px;color:var(--dim);letter-spacing:-.004em}
+  .sub b{color:#a9c8ee;font-weight:400;font-family:var(--mono);font-size:18.5px}
+
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:28px;margin-top:32px;height:498px}
+  .panel{background:linear-gradient(180deg,#131a29,#0e1420);border:1px solid var(--edge);
+    border-radius:18px;display:flex;flex-direction:column;overflow:hidden;
+    box-shadow:0 24px 60px -30px rgba(0,0,0,.95)}
+  .bar{display:flex;align-items:center;gap:12px;padding:14px 20px;border-bottom:1px solid rgba(255,255,255,.055)}
+  .tag{font-family:var(--mono);font-size:10.5px;letter-spacing:.15em;padding:5px 10px;border-radius:7px;color:#fff}
+  .tag.b{background:rgba(178,66,58,.85)} .tag.a{background:rgba(38,105,186,.92)}
+  .bar h2{font-size:16.5px;font-weight:500;color:#cbd5e6;letter-spacing:-.008em}
+  .dots{margin-left:auto;display:flex;gap:6px}
+  .dots span{width:9px;height:9px;border-radius:50%;opacity:.85}
+  .body{padding:16px 20px 0;display:flex;flex-direction:column;flex:1}
+
+  .term{background:#070a11;border:1px solid #1b2333;border-radius:11px;padding:16px 18px;
+    font-family:var(--mono);font-size:16px;line-height:1.6}
+  .path{color:var(--red)} .ask{color:#dde4f0} .mk{color:var(--marker)}
+
+  .attach{padding:13px 16px 14px;background:rgba(96,150,226,.07);
+    border:1px solid rgba(96,150,226,.24);border-radius:11px}
+  .clip{font-family:var(--mono);font-size:13px;color:#8fb8e8;margin-bottom:10px}
+  .thumb{width:178px;height:100px;border-radius:6px;background:#f6f8fc;border:1px solid #33405a;
+    padding:8px 9px;display:flex;flex-direction:column;gap:5px}
+  .thumb .t{height:7px;width:62%;border-radius:2px;background:#8fa2bd}
+  .thumb .row{display:flex;gap:5px}
+  .thumb .box{flex:1;height:27px;border-radius:3px;background:#e3e9f3}
+  .thumb .btn{width:40px;height:27px;border-radius:3px;background:#2f6ada}
+  .thumb .l{height:5px;width:44%;border-radius:2px;background:#c3cddd}
+  .cap{margin-top:8px;font-family:var(--mono);font-size:12px;color:var(--faint)}
+  .none{height:158px;border:1px dashed rgba(255,255,255,.10);border-radius:11px;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px}
+  .none .x{width:30px;height:30px;border-radius:50%;border:1px dashed rgba(242,118,107,.42);
+    display:flex;align-items:center;justify-content:center;color:#a2707a;font-size:15px;line-height:1}
+  .none p{font-family:var(--mono);font-size:12.5px;color:#63707f;letter-spacing:.01em}
+
+  .gap{flex:1;min-height:14px}
+  .sees{border-top:1px dashed rgba(255,255,255,.10);padding:14px 0 18px}
+  .lbl{font-family:var(--mono);font-size:11px;letter-spacing:.13em;color:var(--faint);margin-bottom:9px}
+  .val{font-family:var(--mono);font-size:14.5px;line-height:1.5}
+  .val.bad{color:#e8938c} .val.good{color:#8fd9b4}
+  .meta{margin-top:10px;font-family:var(--mono);font-size:12.5px;color:#6b7789}
+  .meta em{font-style:normal}
+  .meta.bad em{color:#d98d86} .meta.good em{color:#71bd97}
+
+  .chips{display:flex;gap:12px;margin-top:26px}
+  .chip{flex:1;display:flex;align-items:center;gap:10px;padding:13px 16px;border-radius:11px;
+    background:rgba(255,255,255,.028);border:1px solid rgba(255,255,255,.075);
+    font-size:15.5px;color:#c2cddf;letter-spacing:-.006em;white-space:nowrap}
+  .chip i{width:6px;height:6px;border-radius:50%;background:var(--green);flex:0 0 auto;
+    box-shadow:0 0 9px 1px rgba(72,201,138,.55)}
+
+  .foot{display:flex;align-items:center;margin-top:24px;font-family:var(--mono);font-size:15.5px}
+  .foot .cmd{color:#8fb8e8}.foot .cmd b{color:#dfe8f6;font-weight:400}
+  .foot .repo{margin-left:auto;color:#66738a}
+</style></head><body>
+<div class="glow"></div><div class="grid"></div>
+<div class="wrap">
+  <div class="badge"><i></i>PI PACKAGE</div>
+  <h1>Paste screenshots. Keep prompts clean.</h1>
+  <p class="sub">Temporary clipboard paths become stable, clickable <b>[Image&nbsp;#N]</b> markers — and the model gets a thumbnail, not a path.</p>
+
+  <div class="cols">
+    <div class="panel">
+      <div class="bar"><span class="tag b">BEFORE</span><h2>Pi default paste</h2>
+        <div class="dots"><span style="background:#f2766b"></span><span style="background:#e8b13d"></span><span style="background:#48c98a"></span></div></div>
+      <div class="body">
+        <div class="none">
+          <div class="x">&#10005;</div>
+          <p>no preview&nbsp;&nbsp;·&nbsp;&nbsp;no history reference</p>
+        </div>
+        <div class="term" style="margin-top:14px">
+          <div class="path">/var/folders/0n/7wpp6lb56w3gbydzk/</div>
+          <div class="path">T/pi-clipboard-7f32c1a9-3b44-4d2f.png</div>
+          <div class="ask" style="margin-top:11px">Can you review this checkout error?</div>
+        </div>
+        <div class="gap"></div>
+        <div class="sees">
+          <div class="lbl">WHAT THE MODEL RECEIVES</div>
+          <div class="val bad">/var/folders/0n/7wpp6lb56w3gbydzk/T/pi-clipboard-7f32c1a9-3b44-4d2f.png<br>Can you review this checkout error?</div>
+          <div class="meta bad">full-size original · <em>2114×1040 · 848 KB</em></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="bar"><span class="tag a">AFTER</span><h2>with pi-image-view</h2>
+        <div class="dots"><span style="background:#f2766b"></span><span style="background:#e8b13d"></span><span style="background:#48c98a"></span></div></div>
+      <div class="body">
+        <div class="attach">
+          <div class="clip">📎 1 image attached</div>
+          <div class="thumb">
+            <div class="t"></div>
+            <div class="row"><div class="box"></div><div class="box"></div><div class="btn"></div></div>
+            <div class="l"></div>
+          </div>
+          <div class="cap">clipboard.png</div>
+        </div>
+        <div class="term" style="margin-top:14px">
+          <div class="mk">[Image #1]</div>
+          <div class="ask" style="margin-top:7px">Can you review this checkout error?</div>
+        </div>
+        <div class="gap"></div>
+        <div class="sees">
+          <div class="lbl">WHAT THE MODEL RECEIVES</div>
+          <div class="val good">[Image #1]<br>Can you review this checkout error?</div>
+          <div class="meta good">480px PNG thumbnail · <em>480×236 · 123 KB</em></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="chips">
+    <div class="chip"><i></i>480px thumbnails</div>
+    <div class="chip"><i></i>Clickable history</div>
+    <div class="chip"><i></i>Atomic markers</div>
+    <div class="chip"><i></i>No path in context</div>
+    <div class="chip"><i></i>Detail on demand</div>
+  </div>
+
+  <div class="foot">
+    <span class="cmd">pi install <b>npm:pi-image-view</b></span>
+    <span class="repo">github.com/alchemistklk/pi-image-view</span>
+  </div>
+</div>
+</body></html>
