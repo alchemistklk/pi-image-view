@@ -27,7 +27,7 @@ vi.mock("@earendil-works/pi-coding-agent", () => {
 	return { CustomEditor };
 });
 
-import { ImageViewAtomicEditor } from "../src/atomic-editor.ts";
+import { createAtomicMarkerEditor, ImageViewAtomicEditor } from "../src/atomic-editor.ts";
 
 const keys = {
 	matches(data: string, action: string) {
@@ -50,6 +50,11 @@ function makeEditor(options: Partial<{ readClipboard: () => Promise<any>; attach
 /** Let the serialized paste queue drain. */
 const drain = () => new Promise((r) => setImmediate(r));
 
+function hostPaste(editor: any, fallback: () => void = () => {}): () => void {
+	if (!editor.onPasteImage) editor.onPasteImage = fallback;
+	return editor.onPasteImage;
+}
+
 describe("atomic editor adapter", () => {
 	it("restores a whole-marker deletion through the host undo seam", () => {
 		const editor = makeEditor();
@@ -61,11 +66,27 @@ describe("atomic editor adapter", () => {
 		expect(editor.getText()).toBe("[Image #1]x");
 	});
 
+	it("enhances an existing editor instance in place", () => {
+		const base = makeEditor();
+		base.state = { lines: ["[Image #1]x"], cursorLine: 0, cursorCol: 0 };
+		base.render = () => ["zentui-render"];
+		const enhanced = createAtomicMarkerEditor(
+			{ requestRender: vi.fn() } as any, {} as any, keys as any,
+			{ readClipboard: async () => ({ kind: "empty" }), attachImage: () => "[Image #2]" },
+			base,
+		) as any;
+		expect(enhanced).toBe(base);
+		expect(enhanced.render()).toEqual(["zentui-render"]);
+		enhanced.handleInput("DELETE");
+		expect(enhanced.getText()).toBe("x");
+	});
+
 	it("defers to the host when the undo snapshot seam is unavailable", () => {
+		const prototype = Object.getPrototypeOf(Object.getPrototypeOf(makeEditor()));
+		const fallback = vi.spyOn(prototype, "handleInput");
 		const editor = makeEditor();
 		editor.state = { lines: ["[Image #1]x"], cursorLine: 0, cursorCol: 0 };
 		editor.pushUndoSnapshot = undefined;
-		const fallback = vi.spyOn(Object.getPrototypeOf(Object.getPrototypeOf(editor)), "handleInput");
 
 		editor.handleInput("DELETE");
 
@@ -81,7 +102,7 @@ describe("clipboard paste lifecycle", () => {
 			readClipboard: async () => ({ kind: "image", image: { type: "image", data: "x", mimeType: "image/png" } }),
 		});
 
-		editor.onPasteImage();
+		hostPaste(editor)();
 		await drain();
 
 		expect(editor.getText()).toBe("[Image #1]");
@@ -96,7 +117,7 @@ describe("clipboard paste lifecycle", () => {
 		editor.onSubmit = (text: string) => submitted.push(text);
 		editor.state = { lines: ["hello"], cursorLine: 0, cursorCol: 5 };
 
-		editor.onPasteImage();
+		hostPaste(editor)();
 		editor.submitValue();
 		release({ kind: "image", image: { type: "image", data: "x", mimeType: "image/png" } });
 		await drain();
@@ -116,6 +137,45 @@ describe("clipboard paste lifecycle", () => {
 		expect(onSubmit).toHaveBeenCalledWith("draft");
 	});
 
+	it("calls Pi's captured paste handler when direct clipboard access is empty or rejects", async () => {
+		const fallback = vi.fn();
+		const empty = makeEditor();
+		hostPaste(empty, fallback)();
+		await drain();
+		expect(fallback).toHaveBeenCalledTimes(1);
+
+		const rejected = makeEditor({ readClipboard: async () => { throw new Error("command disappeared"); } });
+		hostPaste(rejected, fallback)();
+		await drain();
+		expect(fallback).toHaveBeenCalledTimes(2);
+	});
+
+	it("does not call the fallback after the draft has been submitted", async () => {
+		let release: (payload: any) => void = () => {};
+		const editor = makeEditor({ readClipboard: () => new Promise((resolve) => { release = resolve; }) });
+		const fallback = vi.fn();
+		hostPaste(editor, fallback)();
+		editor.submitValue();
+		release({ kind: "empty" });
+		await drain();
+		expect(fallback).not.toHaveBeenCalled();
+	});
+
+	it("preserves the editor as callback receiver", async () => {
+		const editor = makeEditor();
+		let submitReceiver: unknown;
+		editor.onSubmit = function (this: unknown) { submitReceiver = this; };
+		editor.state = { lines: ["draft"], cursorLine: 0, cursorCol: 5 };
+		editor.submitValue();
+		expect(submitReceiver).toBe(editor);
+
+		const empty = makeEditor();
+		let pasteReceiver: unknown;
+		hostPaste(empty, function (this: unknown) { pasteReceiver = this; })();
+		await drain();
+		expect(pasteReceiver).toBe(empty);
+	});
+
 	it("serializes overlapping pastes and survives a rejected clipboard read", async () => {
 		const payloads: Array<Promise<any>> = [
 			Promise.reject(new Error("clipboard unavailable")),
@@ -125,8 +185,8 @@ describe("clipboard paste lifecycle", () => {
 		let call = 0;
 		const editor = makeEditor({ readClipboard: () => payloads[call++]! });
 
-		editor.onPasteImage();
-		editor.onPasteImage();
+		hostPaste(editor)();
+		hostPaste(editor)();
 		await drain();
 
 		expect(editor.getText()).toBe("second");

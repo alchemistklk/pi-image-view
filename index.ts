@@ -14,7 +14,7 @@ import {
 import { registerImagePreviewExtension } from "./src/extension-runtime.ts";
 import { resizeForDetail, resizeForPreview } from "./src/preview-resize.ts";
 import { createAtomicMarkerEditor } from "./src/atomic-editor.ts";
-import { readDirectClipboard, supportsDirectClipboard } from "./src/clipboard.ts";
+import { canReadDirectClipboard, readDirectClipboard } from "./src/clipboard.ts";
 
 // pi bundles the WASM image resizer and PNG converter and exposes them on its
 // package entry. The extension is loaded through jiti, which aliases the
@@ -55,16 +55,14 @@ function resolvePersistedImage(reference: string): string | undefined {
 
 
 export function createImageView() {
-	const useDirectEditor = supportsDirectClipboard();
 	return (pi: any): void => registerImagePreviewExtension(pi, {
 		readImageContentFromPathAsync,
 		maybeResizeImage: buildPreviewThumbnail,
 		resizeDetailImage: buildDetailImage,
 		normalizeImageForMatching,
 		isImagePasteInput: (data) => matchesKey(data, "ctrl+v") || matchesKey(data, "alt+v"),
-		createAtomicEditor: useDirectEditor
-			? (tui, theme, keys, attachImage) => createAtomicMarkerEditor(tui as any, theme as any, keys as any, { readClipboard: readDirectClipboard, attachImage })
-			: undefined,
+		createAtomicEditor: (tui, theme, keys, attachImage, baseEditor) => createAtomicMarkerEditor(tui as any, theme as any, keys as any, { readClipboard: readDirectClipboard, attachImage }, baseEditor),
+		supportsAtomicEditor: canReadDirectClipboard,
 		storeImage: persistImage,
 		resolveImageReference: resolvePersistedImage,
 		loadImageContentFromPath: (filePath) => loadImageContentFromPath(filePath),
