@@ -1,3 +1,4 @@
+node_modules
 node_modules/
 dist/
 *.js
@@ -6,3 +7,7 @@ dist/
 !src/**/*.d.ts
 .DS_Store
 .pi/
+benchmarks/ocr/generated/
+benchmarks/ocr/results/held-out/
+__pycache__/
+*.pyc
