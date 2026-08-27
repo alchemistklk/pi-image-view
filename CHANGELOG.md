@@ -5,6 +5,10 @@ All notable changes to `pi-image-view` are documented here. This project follows
 
 ## Unreleased
 
+## 0.3.0 — 2026-08-27
+
+Native Linux clipboard support and load-order-independent Zentui composition.
+
 ### Added
 
 - Native Linux direct clipboard support: Wayland `wl-paste`, X11 `xclip`, and text-only X11 `xsel`. Detection is asynchronous, commands use bounded `execFile` calls, and unavailable commands, MIME targets, or reads fall back to Pi's built-in paste path. `xsel` is text-only because its `-t` flag is a retrieval timeout, not a MIME-target selector, so [Issue #7](https://github.com/alchemistklk/pi-image-view/issues/7) stays open pending an acceptance-criteria update and a real Wayland/X11 probe.
