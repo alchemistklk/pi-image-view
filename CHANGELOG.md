@@ -5,9 +5,19 @@ All notable changes to `pi-image-view` are documented here. This project follows
 
 ## Unreleased
 
+## 0.2.2 — 2026-08-27
+
+Session-global image IDs and Pi package peer alignment.
+
+### Added
+
+- `[Image #N]` numbering now increases across turns and resumes from the active session branch after reload, resume, or fork.
+- Marker allocation skips IDs already present in the current draft and ignores marker-like assistant text when restoring the counter.
+
 ### Changed
 
-- Pi core packages are declared as wildcard peers, matching Pi package guidance. Pi's installer provides these from the host and does not install a duplicate runtime. Private atomic-editor seams remain guarded at runtime.
+- Pi core packages are declared as wildcard peers, matching Pi package guidance. Pi's installer provides these from the host and does not install a duplicate runtime.
+- Pi 0.84.3 remains the tested host; private atomic-editor seams are feature-checked at runtime instead of using peer semver as an ineffective compatibility gate.
 
 ## 0.2.1 — 2026-08-26
 
