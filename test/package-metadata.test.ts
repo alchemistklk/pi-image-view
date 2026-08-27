@@ -6,6 +6,7 @@ const packageJson = JSON.parse(
 ) as {
 	dependencies?: Record<string, string>;
 	peerDependencies?: Record<string, string>;
+	pi?: { image?: string };
 };
 
 describe("package metadata", () => {
@@ -16,5 +17,10 @@ describe("package metadata", () => {
 	});
 		expect(packageJson.dependencies ?? {}).not.toHaveProperty("@earendil-works/pi-coding-agent");
 		expect(packageJson.dependencies ?? {}).not.toHaveProperty("@earendil-works/pi-tui");
+	});
+	it("publishes a stable Pi Gallery image", () => {
+		expect(packageJson.pi?.image).toBe(
+			"https://raw.githubusercontent.com/alchemistklk/pi-image-view/main/screenshot.png",
+		);
 	});
 });
