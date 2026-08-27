@@ -40,7 +40,7 @@ pi -e npm:pi-image-view
 
 Paste an image with `Ctrl+V` (`Alt+V` on Windows and WSL). If Pi is already running, `/reload` picks up a fresh install.
 
-**Requirements:** Pi `0.84.3`–`0.84.x`. Inline thumbnails additionally need a Kitty-graphics-capable terminal; everything else degrades to text.
+**Compatibility:** tested with Pi `0.84.3`. Pi supplies the core runtime packages declared as wildcard peers; private editor seams are feature-checked at runtime so unsupported atomic deletion falls back to Pi's normal editor behavior. Inline thumbnails additionally need a Kitty-graphics-capable terminal; everything else degrades to text.
 
 ## Commands
 

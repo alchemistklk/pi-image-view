@@ -3,7 +3,13 @@
 All notable changes to `pi-image-view` are documented here. This project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## 0.2.1 — unreleased
+## Unreleased
+
+### Changed
+
+- Pi core packages are declared as wildcard peers, matching Pi package guidance. Pi's installer provides these from the host and does not install a duplicate runtime. Private atomic-editor seams remain guarded at runtime.
+
+## 0.2.1 — 2026-08-26
 
 Documentation and package metadata only. No runtime code changes.
 
@@ -65,8 +71,7 @@ Direct clipboard paste, atomic `[Image #N]` markers, and a one-shot detail mode.
 
 ### Changed
 
-- `peerDependencies` are pinned to `>=0.84.3 <0.85.0`. The custom editor depends on
-  host editor internals, so the supported Pi range is now explicit rather than `*`.
+- Atomic-editor compatibility is tested against Pi 0.84.3. Private undo support is feature-checked at runtime and falls back to normal deletion when unavailable.
 
 ### Known limitations
 
