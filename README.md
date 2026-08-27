@@ -1,5 +1,7 @@
 # pi-image-view
 
+![pi-image-view turns pasted screenshot paths into compact image markers](https://raw.githubusercontent.com/alchemistklk/pi-image-view/main/screenshot.png)
+
 **Paste a screenshot into the [Pi coding agent](https://pi.dev) without pasting a filesystem path.**
 
 `pi-image-view` is a Pi extension that turns pasted, dragged, and typed image paths into a stable `[Image #N]` reference, sends the model a compact 480px PNG thumbnail instead of the full-size original, and keeps the reference clickable in conversation history for the life of the session and beyond.
