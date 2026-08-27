@@ -53,7 +53,7 @@ Paste an image with `Ctrl+V` (`Alt+V` on Windows and WSL). If Pi is already runn
 
 | Action | Key | Behavior |
 | --- | --- | --- |
-| Paste image | `Ctrl+V` / `Alt+V` | Inserts `[Image #N]` directly on macOS, Windows, WSL. `N` increases across turns and resumes from the active session branch. No temporary path is ever displayed. |
+| Paste image | `Ctrl+V` / `Alt+V` | Inserts `[Image #N]` directly on macOS, Windows, WSL, and supported native Linux desktops. `N` increases across turns and resumes from the active session branch. No temporary path is ever displayed. |
 | Paste text | `Ctrl+V` / `Alt+V` | Unchanged — text pastes as text. |
 | Drag & drop a file | — | The dropped path is detected and replaced within ~240ms. |
 | Move across a marker | `←` / `→` | Jumps the whole `[Image #N]` marker, not character by character. |
@@ -74,7 +74,7 @@ Paste an image with `Ctrl+V` (`Alt+V` on Windows and WSL). If Pi is already runn
 
 ## How it works
 
-1. Pi writes a pasted image to a temporary path — or, on macOS/Windows/WSL, `pi-image-view` reads the clipboard itself and skips this step.
+1. Pi writes a pasted image to a temporary path — or, on macOS/Windows/WSL and supported native Linux desktops, `pi-image-view` reads the clipboard itself and skips this step.
 2. The extension loads the image and replaces the path in the editor with `[Image #N]`.
 3. On submit it builds a best-effort 480px PNG preview, sends that as the model image, and writes the same bytes to a content-addressed blob:
 
@@ -107,9 +107,9 @@ The stored blob always contains whichever bytes were actually submitted.
 | macOS | Read directly via `osascript`; `[Image #N]` appears immediately | `pi-image-view` custom editor |
 | Windows | Read directly via PowerShell | `pi-image-view` custom editor |
 | WSL | Read directly via `powershell.exe` interop | `pi-image-view` custom editor |
-| Native Linux | Falls back to Pi's paste plus burst path scans | Pi's default editor |
+| Native Linux | Direct with Wayland `wl-paste`, or X11 `xclip`; text-only with X11 `xsel` | Custom editor only after asynchronous capability detection |
 
-Selection is automatic. There is no environment variable or wrapper to configure.
+Selection is automatic. Wayland is preferred when `WAYLAND_DISPLAY` is set; otherwise X11 requires `DISPLAY`. The extension accepts only PNG, JPEG, GIF, and WebP image targets, bounds each Linux command to 1.5 seconds, and limits image/text reads to 50 MiB/10 MiB. If a command, target, or read is unavailable, Pi's normal paste handler remains (or is invoked) so its temporary-path plus burst-scan fallback still works. `xsel` is deliberately text-only: its `-t` option is a selection retrieval timeout, not a MIME-target selector. There is no environment variable or wrapper to configure.
 
 ## Terminal support
 
@@ -144,7 +144,7 @@ To reclaim space manually, delete files under `~/.pi/agent/image-view/blobs/`. H
 
 ### The editor still shows a long path instead of `[Image #N]`
 
-On native Linux, replacement happens on a scan a few frames after the paste — this is expected and resolves within ~240ms. If it persists anywhere, run `PI_IMAGE_VIEW_DEBUG=1 pi` and check stderr; the most common cause is a file extension outside PNG/JPEG/GIF/WebP or a file over 50 MB.
+On native Linux, a path can still appear briefly when `wl-paste`/`xclip` is unavailable, when only text-capable `xsel` is installed, or when the direct clipboard read falls back. Pi then inserts its temporary path and image-view converts it within the ~240ms burst-scan window. A persistent path usually means the format is outside PNG/JPEG/GIF/WebP or the file exceeds 50 MB.
 
 ### No inline thumbnail, just a text label
 
@@ -160,7 +160,7 @@ One of the attached images is not a PNG, which happens when PNG conversion fails
 
 ### Images stop working after installing `pi-zentui`
 
-Load order matters. Load `pi-image-view` **before** `pi-zentui` so Zentui wraps the image-view editor. The reverse order can destabilize editor/status reconciliation. Tracked in [Issue #1](https://github.com/alchemistklk/pi-image-view/issues/1); not yet fully resolved.
+`pi-image-view` is **provisionally** compatible with `pi-zentui` 0.21.0 in either package order: it enhances an existing editor instance in place rather than replacing the renderer, and preserves Zentui's ownership metadata during reconciliation. This is covered by fixtures but has not yet been attested against a real Zentui install across reloads and session replacement, so keep loading `pi-image-view` **before** `pi-zentui` if you need a known-good order. Note that disabling Zentui's editor component also removes image-view's direct paste and atomic markers until reload, because Zentui owns the composed factory. Tracked in [Issue #1](https://github.com/alchemistklk/pi-image-view/issues/1), which stays open until the desktop matrix passes.
 
 ### A long session with many screenshots got slow
 

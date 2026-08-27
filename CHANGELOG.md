@@ -5,6 +5,14 @@ All notable changes to `pi-image-view` are documented here. This project follows
 
 ## Unreleased
 
+### Added
+
+- Native Linux direct clipboard support: Wayland `wl-paste`, X11 `xclip`, and text-only X11 `xsel`. Detection is asynchronous, commands use bounded `execFile` calls, and unavailable commands, MIME targets, or reads fall back to Pi's built-in paste path. `xsel` is text-only because its `-t` flag is a retrieval timeout, not a MIME-target selector, so [Issue #7](https://github.com/alchemistklk/pi-image-view/issues/7) stays open pending an acceptance-criteria update and a real Wayland/X11 probe.
+
+### Fixed
+
+- `pi-zentui` 0.21.0 editor composition is **provisionally** load-order independent: image-view enhances an existing editor instance in place, preserves Zentui ownership metadata, and removes nested editor factories safely during forward-ordered shutdown. A forwarding wrapper that does not own its editing state is declined rather than decorated, so the host's submit and paste callbacks keep reaching the real editor. Verified by fixtures only; [Issue #1](https://github.com/alchemistklk/pi-image-view/issues/1) stays open until a real pi-zentui install is attested in both orders.
+
 ## 0.2.2 — 2026-08-27
 
 Session-global image IDs and Pi package peer alignment.

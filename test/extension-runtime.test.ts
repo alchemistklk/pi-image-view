@@ -376,6 +376,39 @@ describe("draft scan lifecycle", () => {
 		expect(attach({ type: "image", data: "CLIP", mimeType: "image/png" })).toBe("[Image #13]");
 	});
 
+	it("awaits direct clipboard capability before installing the optional editor", async () => {
+		const createAtomicEditor = vi.fn();
+		const supportsAtomicEditor = vi.fn(async () => false);
+		const { handlers, ctx } = makeHarness({
+			readImageContentFromPathAsync: vi.fn(async () => null),
+			loadImageContentFromPath: vi.fn(async () => null),
+			createAtomicEditor,
+			supportsAtomicEditor,
+		});
+
+		await handlers.get("session_start")!(undefined, ctx);
+		expect(supportsAtomicEditor).toHaveBeenCalledTimes(1);
+		expect(ctx.ui.setEditorComponent).not.toHaveBeenCalled();
+	});
+
+	it("does not install an editor after a stale capability result resolves", async () => {
+		let release: (value: boolean) => void = () => {};
+		const { handlers, ctx } = makeHarness({
+			readImageContentFromPathAsync: vi.fn(async () => null),
+			loadImageContentFromPath: vi.fn(async () => null),
+			createAtomicEditor: vi.fn(),
+			supportsAtomicEditor: () => new Promise<boolean>((resolve) => { release = resolve; }),
+		});
+
+		const starting = handlers.get("session_start")!(undefined, ctx);
+		await handlers.get("session_shutdown")!(undefined, ctx);
+		release(true);
+		await starting;
+		expect(ctx.ui.setEditorComponent).not.toHaveBeenCalled();
+		expect(ctx.ui.onTerminalInput).not.toHaveBeenCalled();
+		expect(ctx.ui.getEditorText).not.toHaveBeenCalled();
+	});
+
 	it("installs and removes the optional atomic editor with the session lifecycle", async () => {
 		const createAtomicEditor = vi.fn();
 		const { handlers, ctx } = makeHarness({
@@ -389,7 +422,7 @@ describe("draft scan lifecycle", () => {
 		await handlers.get("session_start")!(undefined, ctx);
 		const factory = ctx.ui.setEditorComponent.mock.calls[0]?.[0];
 		expect(factory?.("tui", "theme", "keys")).toBe(editor);
-		expect(createAtomicEditor).toHaveBeenCalledWith("tui", "theme", "keys", expect.any(Function));
+		expect(createAtomicEditor).toHaveBeenCalledWith("tui", "theme", "keys", expect.any(Function), undefined);
 		const attachImage = createAtomicEditor.mock.calls[0]?.[3];
 		expect(attachImage({ type: "image", data: "CLIP", mimeType: "image/png" })).toBe("[Image #1]");
 		await handlers.get("session_shutdown")!(undefined, ctx);
@@ -424,6 +457,160 @@ describe("draft scan lifecycle", () => {
 		}
 	});
 
+
+	it("enhances a Zentui-owned editor without replacing its renderer metadata", async () => {
+		const owner = Symbol("zentui-owner");
+		const zentuiEditor = { render: () => ["zentui"] };
+		const zentuiFactory = vi.fn(() => zentuiEditor) as any;
+		zentuiFactory[Symbol.for("pi-zentui.editor-factory")] = true;
+		zentuiFactory[Symbol.for("pi-zentui.editor-owner")] = owner;
+		const zentuiBase = vi.fn();
+		zentuiFactory[Symbol.for("pi-zentui.editor-base-factory")] = zentuiBase;
+		const createAtomicEditor = vi.fn((_tui, _theme, _keys, _attach, base) => base);
+		const { handlers, ctx } = makeHarness({
+			readImageContentFromPathAsync: vi.fn(async () => null),
+			loadImageContentFromPath: vi.fn(async () => null),
+			createAtomicEditor,
+		});
+		ctx.ui.setEditorComponent(zentuiFactory);
+
+		await handlers.get("session_start")!(undefined, ctx);
+		const composedFactory = ctx.ui.getEditorComponent() as any;
+		expect(composedFactory[Symbol.for("pi-zentui.editor-factory")]).toBe(true);
+		expect(composedFactory[Symbol.for("pi-zentui.editor-owner")]).toBe(owner);
+		expect(composedFactory[Symbol.for("pi-zentui.editor-base-factory")]).toBe(zentuiBase);
+		expect(composedFactory("tui", "theme", "keys")).toBe(zentuiEditor);
+		expect(createAtomicEditor).toHaveBeenCalledWith(
+			"tui", "theme", "keys", expect.any(Function), zentuiEditor,
+		);
+
+		// Zentui runs first during shutdown and removes its adopted owned layer.
+		ctx.ui.setEditorComponent(undefined);
+		await handlers.get("session_shutdown")!(undefined, ctx);
+		expect(ctx.ui.getEditorComponent()).toBeUndefined();
+	});
+
+	it("clears the editor instead of restoring a Zentui factory it still fronts", async () => {
+		const zentuiFactory = vi.fn() as any;
+		zentuiFactory[Symbol.for("pi-zentui.editor-factory")] = true;
+		const { handlers, ctx } = makeHarness({
+			readImageContentFromPathAsync: vi.fn(async () => null),
+			loadImageContentFromPath: vi.fn(async () => null),
+			createAtomicEditor: vi.fn(() => ({ kind: "atomic" })),
+		});
+		ctx.ui.setEditorComponent(zentuiFactory);
+		await handlers.get("session_start")!(undefined, ctx);
+		const composed = ctx.ui.getEditorComponent();
+		expect(composed).not.toBe(zentuiFactory);
+
+		// Image-view shuts down first, while its composed factory is still installed.
+		await handlers.get("session_shutdown")!(undefined, ctx);
+
+		// Restoring the Zentui factory would resurrect an editor Zentui is tearing down.
+		expect(ctx.ui.getEditorComponent()).toBeUndefined();
+	});
+
+	it("restores a displaced non-Zentui factory on shutdown", async () => {
+		const plainFactory = vi.fn() as any;
+		const { handlers, ctx } = makeHarness({
+			readImageContentFromPathAsync: vi.fn(async () => null),
+			loadImageContentFromPath: vi.fn(async () => null),
+			createAtomicEditor: vi.fn(() => ({ kind: "atomic" })),
+		});
+		ctx.ui.setEditorComponent(plainFactory);
+		await handlers.get("session_start")!(undefined, ctx);
+		await handlers.get("session_shutdown")!(undefined, ctx);
+
+		expect(ctx.ui.getEditorComponent()).toBe(plainFactory);
+	});
+
+	it("builds a standalone editor when the displaced factory throws", async () => {
+		const brokenFactory = vi.fn(() => { throw new Error("incompatible extension"); }) as any;
+		const createAtomicEditor = vi.fn(() => ({ kind: "atomic" }));
+		const { handlers, ctx } = makeHarness({
+			readImageContentFromPathAsync: vi.fn(async () => null),
+			loadImageContentFromPath: vi.fn(async () => null),
+			createAtomicEditor,
+		});
+		ctx.ui.setEditorComponent(brokenFactory);
+		await handlers.get("session_start")!(undefined, ctx);
+		const composed = ctx.ui.getEditorComponent() as any;
+
+		expect(() => composed("tui", "theme", "keys")).not.toThrow();
+		expect(createAtomicEditor).toHaveBeenCalledWith("tui", "theme", "keys", expect.any(Function), undefined);
+	});
+
+	it("does not restore a displaced factory that failed at startup", async () => {
+		const brokenFactory = vi.fn(() => { throw new Error("incompatible extension"); }) as any;
+		const { handlers, ctx } = makeHarness({
+			readImageContentFromPathAsync: vi.fn(async () => null),
+			loadImageContentFromPath: vi.fn(async () => null),
+			createAtomicEditor: vi.fn(() => ({ kind: "atomic" })),
+		});
+		ctx.ui.setEditorComponent(brokenFactory);
+		await handlers.get("session_start")!(undefined, ctx);
+		(ctx.ui.getEditorComponent() as any)("tui", "theme", "keys");
+
+		// Pi's setEditorComponent invokes the factory synchronously, so restoring a
+		// factory that throws would take down session teardown.
+		const store = ctx.ui.setEditorComponent;
+		ctx.ui.setEditorComponent = vi.fn((factory?: (...args: any[]) => unknown) => {
+			factory?.("tui", "theme", "keys");
+			return store(factory);
+		});
+
+		expect(() => handlers.get("session_shutdown")!(undefined, ctx)).not.toThrow();
+		expect(ctx.ui.getEditorComponent()).toBeUndefined();
+	});
+
+	it("removes its exposed base after a later-loaded Zentui wrapper shuts down", async () => {
+		vi.useFakeTimers();
+		try {
+			const createAtomicEditor = vi.fn(() => ({ kind: "atomic" }));
+			const { handlers, ctx } = makeHarness({
+				readImageContentFromPathAsync: vi.fn(async () => null),
+				loadImageContentFromPath: vi.fn(async () => null),
+				createAtomicEditor,
+			});
+			const ui = ctx.ui;
+			let stale = false;
+			Object.defineProperty(ctx, "ui", { get: () => { if (stale) throw new Error("stale context"); return ui; } });
+			await handlers.get("session_start")!(undefined, ctx);
+			const imageViewFactory = ui.getEditorComponent();
+			const zentuiWrapper = vi.fn();
+			ctx.ui.setEditorComponent(zentuiWrapper);
+
+			// Image-view shuts down first; Zentui then peels to its recorded base.
+			await handlers.get("session_shutdown")!(undefined, ctx);
+			stale = true;
+			ui.setEditorComponent(imageViewFactory);
+			await vi.runOnlyPendingTimersAsync();
+
+			expect(ui.getEditorComponent()).toBeUndefined();
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("does not clear a newer factory when deferred shutdown cleanup runs", async () => {
+		vi.useFakeTimers();
+		try {
+			const { handlers, ctx } = makeHarness({
+				readImageContentFromPathAsync: vi.fn(async () => null),
+				loadImageContentFromPath: vi.fn(async () => null),
+				createAtomicEditor: vi.fn(() => ({ kind: "atomic" })),
+			});
+			await handlers.get("session_start")!(undefined, ctx);
+			ctx.ui.setEditorComponent(vi.fn());
+			await handlers.get("session_shutdown")!(undefined, ctx);
+			const newerFactory = vi.fn();
+			ctx.ui.setEditorComponent(newerFactory);
+			await vi.runOnlyPendingTimersAsync();
+			expect(ctx.ui.getEditorComponent()).toBe(newerFactory);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
 
 	it("does not clear an editor factory installed by another extension", async () => {
 		const createAtomicEditor = vi.fn(() => ({ kind: "atomic" }));

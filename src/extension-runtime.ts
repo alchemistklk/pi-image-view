@@ -30,7 +30,9 @@ export type ExtensionDeps = {
 	maybeResizeImage?: (image: ImageContent) => Promise<ImageContent>;
 	resizeDetailImage?: (image: ImageContent) => Promise<ImageContent>;
 	normalizeImageForMatching?: (image: ImageContent) => Promise<ImageContent>;
-	createAtomicEditor?: (tui: unknown, theme: unknown, keybindings: unknown, attachImage: (image: ImageContent) => string) => unknown;
+	createAtomicEditor?: (tui: unknown, theme: unknown, keybindings: unknown, attachImage: (image: ImageContent) => string, baseEditor?: object) => unknown;
+	/** Resolves before installing the custom editor so unavailable clipboard backends keep Pi paste intact. */
+	supportsAtomicEditor?: () => Promise<boolean>;
 	isImagePasteInput?: (data: string) => boolean;
 	loadImageContentFromPath: (
 		filePath: string,
@@ -197,8 +199,11 @@ export function registerImagePreviewExtension(
 		return { messages: sanitizeModelMessages(event.messages, clearBeforeIndex) };
 	});
 
-	let installedEditorFactory: ((tui: unknown, theme: unknown, keybindings: unknown) => unknown) | undefined;
-	let previousEditorFactory: ((tui: unknown, theme: unknown, keybindings: unknown) => unknown) | undefined;
+	type EditorFactory = (tui: unknown, theme: unknown, keybindings: unknown) => unknown;
+	let installedEditorFactory: EditorFactory | undefined;
+	let previousEditorFactory: EditorFactory | undefined;
+	/** Set once a displaced factory throws, so shutdown never hands it back. */
+	let previousEditorFactoryFailed = false;
 	let tracked: Map<string, TrackedImage> = new Map();
 	let gallery: ImageGallery | null = null;
 	let pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -211,6 +216,7 @@ export function registerImagePreviewExtension(
 	let lastScannedText: string | undefined;
 	let failedScanText: string | undefined;
 	let failedScanAttempts = 0;
+	let sessionGeneration = 0;
 
 	// ── Helpers ────────────────────────────────────────────
 
@@ -446,6 +452,7 @@ export function registerImagePreviewExtension(
 		for (const timer of pasteScanTimers) clearTimeout(timer);
 		pasteScanTimers.clear();
 		scanGeneration += 1;
+		sessionGeneration += 1;
 		lastScannedText = undefined;
 		latestCtx = null;
 		if (gallery) {
@@ -455,6 +462,7 @@ export function registerImagePreviewExtension(
 	};
 
 	pi.on("session_start", async (_event: unknown, ctx: CtxLike) => {
+		const generation = ++sessionGeneration;
 		clearBeforeIndex = undefined;
 		detailNextSubmission = false;
 		clearOnNextContext = false;
@@ -463,10 +471,40 @@ export function registerImagePreviewExtension(
 		resetDraft(ctx);
 		nextPlaceholderNumber = nextImageNumberForBranch(ctx.sessionManager?.getBranch() ?? []);
 		if (deps.createAtomicEditor && ctx.ui.setEditorComponent) {
-			previousEditorFactory = ctx.ui.getEditorComponent?.();
-			installedEditorFactory = (tui, theme, keybindings) =>
-				deps.createAtomicEditor!(tui, theme, keybindings, attachClipboardImage);
-			ctx.ui.setEditorComponent(installedEditorFactory);
+			let supported = true;
+			try {
+				if (deps.supportsAtomicEditor) supported = await deps.supportsAtomicEditor();
+			} catch (error) {
+				supported = false;
+				debugLog("Direct clipboard capability detection failed", error);
+			}
+			// A shutdown or a newer session may have won while capability detection ran.
+			// Stop the obsolete handler before *all* later startup side effects.
+			if (generation !== sessionGeneration || latestCtx !== ctx) return;
+			if (supported) {
+				previousEditorFactory = ctx.ui.getEditorComponent?.();
+				previousEditorFactoryFailed = false;
+				const previous = previousEditorFactory;
+				installedEditorFactory = (tui, theme, keybindings) => {
+					// A displaced factory belongs to another extension. If it throws, build
+					// our own editor rather than leaving the session with no editor at all.
+					let baseEditor: unknown;
+					try {
+						baseEditor = previous?.(tui, theme, keybindings);
+					} catch (error) {
+						debugLog("Displaced editor factory failed; building a standalone editor", error);
+						previousEditorFactoryFailed = true;
+						baseEditor = undefined;
+					}
+					return deps.createAtomicEditor!(tui, theme, keybindings, attachClipboardImage, baseEditor && typeof baseEditor === "object" ? baseEditor : undefined);
+				};
+				for (const name of ["pi-zentui.editor-factory", "pi-zentui.editor-owner", "pi-zentui.editor-base-factory"] as const) {
+					const symbol = Symbol.for(name);
+					const value = previous ? (previous as unknown as Record<symbol, unknown>)[symbol] : undefined;
+					if (value !== undefined) Object.defineProperty(installedEditorFactory, symbol, { value });
+				}
+				ctx.ui.setEditorComponent(installedEditorFactory);
+			}
 		}
 		if (ctx.hasUI !== false && ctx.mode !== "print" && ctx.mode !== "json") {
 			startPolling();
@@ -481,14 +519,35 @@ export function registerImagePreviewExtension(
 
 	pi.on("session_shutdown", (_event: unknown, ctx: CtxLike) => {
 		cleanup();
-		if (
-			installedEditorFactory &&
-			ctx.ui.getEditorComponent?.() === installedEditorFactory
-		) {
-			ctx.ui.setEditorComponent?.(previousEditorFactory);
+		const installed = installedEditorFactory;
+		const previousIsZentui = Boolean(previousEditorFactory && (previousEditorFactory as unknown as Record<symbol, unknown>)[Symbol.for("pi-zentui.editor-factory")]);
+		// Zentui tears its own editor down, and a factory that already threw would
+		// throw again: `setEditorComponent` invokes the factory synchronously, so
+		// either one would break teardown rather than restore anything.
+		const previous = previousIsZentui || previousEditorFactoryFailed ? undefined : previousEditorFactory;
+		const ui = ctx.ui;
+		/** Restoring runs foreign code, so never let it escape the shutdown handler. */
+		const restore = (factory: EditorFactory | undefined): void => {
+			try {
+				ui.setEditorComponent?.(factory);
+			} catch (error) {
+				debugLog("Restoring the displaced editor factory failed; clearing it", error);
+				try { ui.setEditorComponent?.(undefined); } catch { /* disposed UI */ }
+			}
+		};
+		if (installed && ui.getEditorComponent?.() === installed) {
+			restore(previous);
+		} else if (installed) {
+			const timer = setTimeout(() => {
+				try {
+					if (ui.getEditorComponent?.() === installed) restore(previous);
+				} catch { /* disposed UI */ }
+			}, 0);
+			timer.unref?.();
 		}
 		installedEditorFactory = undefined;
 		previousEditorFactory = undefined;
+		previousEditorFactoryFailed = false;
 	});
 
 	pi.on("tool_result", async (event: ToolResultEvent, ctx: CtxLike) => {
