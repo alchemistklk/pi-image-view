@@ -5,6 +5,20 @@ All notable changes to `pi-image-view` are documented here. This project follows
 
 ## Unreleased
 
+## 0.3.1 — 2026-08-27
+
+Package discovery artwork and an evidence-backed 480px quality baseline. No runtime behavior changes.
+
+### Added
+
+- A privacy-safe Before/After Gallery image and stable `pi.image` metadata for pi.dev package cards and details.
+- A deterministic OCR benchmark harness plus a clean 48-trial source/480px/1280px baseline across Luna and Sol. The result keeps 480px as the ordinary default, retains explicit `/pi-image-view detail` for dense diagrams, and does not enable automatic escalation.
+
+### Changed
+
+- The README now opens with the new Gallery artwork using an absolute GitHub URL that renders correctly on npm.
+- The Gallery image was rebuilt from a reproducible HTML card and reduced to a 1600×900 privacy-safe asset.
+
 ## 0.3.0 — 2026-08-27
 
 Native Linux clipboard support and load-order-independent Zentui composition.
