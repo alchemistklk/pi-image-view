@@ -17,6 +17,7 @@ function makeHarness(deps: any) {
 	let terminalInputHandler: ((data: string) => unknown) | undefined;
 	let activeEditorFactory: ((...args: any[]) => unknown) | undefined;
 	let markdownTransformer: ((markdown: string, context: { messageType: string }) => string) | undefined;
+	const requestRender = vi.fn();
 	const pi = {
 		on: (event: string, handler: Handler) => handlers.set(event, handler),
 		registerCommand: (name: string, options: { handler: (args: string, ctx: any) => void }) => commands.set(name, options),
@@ -34,14 +35,16 @@ function makeHarness(deps: any) {
 			onTerminalInput: vi.fn((handler: (data: string) => unknown) => { terminalInputHandler = handler; return vi.fn(); }),
 			setEditorComponent: vi.fn((factory: ((...args: any[]) => unknown) | undefined) => { activeEditorFactory = factory; }),
 			notify: vi.fn(),
-			setWidget: vi.fn(),
+			setWidget: vi.fn((_key: string, content: unknown) => {
+				if (typeof content === "function") content({ requestRender }, { fg: (_name: string, text: string) => text, bold: (text: string) => text });
+			}),
 			getEditorText: vi.fn(() => ""),
 			setEditorText: vi.fn(),
 			theme: {},
 		},
 	};
 	registerImagePreviewExtension(pi as any, deps);
-	return { handlers, command: commands.get("pi-image-view")!, ctx, getMarkdownTransformer: () => markdownTransformer, getTerminalInputHandler: () => terminalInputHandler };
+	return { handlers, command: commands.get("pi-image-view")!, ctx, requestRender, getMarkdownTransformer: () => markdownTransformer, getTerminalInputHandler: () => terminalInputHandler };
 }
 
 describe("compact editor attachments", () => {
@@ -667,6 +670,42 @@ describe("draft scan lifecycle", () => {
 			await interactive.handlers.get("session_shutdown")!(undefined, interactive.ctx);
 			await vi.advanceTimersByTimeAsync(500);
 			expect(interactive.ctx.ui.getEditorText).toHaveBeenCalledTimes(1);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+});
+
+
+describe("incremental gallery runtime integration", () => {
+	it("mounts one widget while staggered previews request coalesced redraws", async () => {
+		vi.useFakeTimers();
+		try {
+			let releaseFirst!: (image: any) => void;
+			let releaseSecond!: (image: any) => void;
+			const raw = (data: string) => ({ type: "image" as const, data, mimeType: "image/png" });
+			const resize = vi.fn((image: any) => image.data === "one"
+				? new Promise((resolve) => { releaseFirst = resolve; })
+				: new Promise((resolve) => { releaseSecond = resolve; }));
+			const { handlers, ctx, requestRender } = makeHarness({
+				readImageContentFromPathAsync: vi.fn(async (filePath: string) => raw(filePath.includes("one") ? "one" : "two")),
+				loadImageContentFromPath: vi.fn(async () => null),
+				maybeResizeImage: resize,
+			});
+			ctx.ui.getEditorText = vi.fn(() => "/tmp/one.png /tmp/two.png");
+			await handlers.get("session_start")!(undefined, ctx);
+			ctx.ui.setWidget.mockClear(); // session reset clears the previous draft before the first mount.
+			await vi.advanceTimersByTimeAsync(250);
+			expect(ctx.ui.setWidget).toHaveBeenCalledTimes(1);
+			expect(requestRender).toHaveBeenCalledTimes(1);
+
+			releaseFirst(raw("one-preview"));
+			releaseSecond(raw("two-preview"));
+			await Promise.resolve();
+			await vi.advanceTimersByTimeAsync(50);
+			expect(ctx.ui.setWidget).toHaveBeenCalledTimes(1);
+			expect(requestRender).toHaveBeenCalledTimes(2);
+			await handlers.get("session_shutdown")!(undefined, ctx);
 		} finally {
 			vi.useRealTimers();
 		}
