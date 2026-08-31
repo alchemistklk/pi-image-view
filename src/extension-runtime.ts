@@ -5,7 +5,8 @@ import {
 	renderImageMarkerLinks,
 	sanitizeModelMessages,
 } from "./attachment-links.ts";
-import { ImageGallery, type GalleryImage } from "./image-gallery.ts";
+import { type GalleryImage } from "./image-gallery.ts";
+import { GalleryPresenter } from "./gallery-presenter.ts";
 import { extractImagePaths } from "./image-paths.ts";
 import { upgradeScreenshotToolResult } from "./tool-result-upgrader.ts";
 import { debugLog } from "./debug.ts";
@@ -30,7 +31,7 @@ export type ExtensionDeps = {
 	maybeResizeImage?: (image: ImageContent) => Promise<ImageContent>;
 	resizeDetailImage?: (image: ImageContent) => Promise<ImageContent>;
 	normalizeImageForMatching?: (image: ImageContent) => Promise<ImageContent>;
-	createAtomicEditor?: (tui: unknown, theme: unknown, keybindings: unknown, attachImage: (image: ImageContent) => string, baseEditor?: object) => unknown;
+	createAtomicEditor?: (tui: unknown, theme: unknown, keybindings: unknown, attachImage: (image: ImageContent) => string, baseEditor?: Record<string, unknown>) => unknown;
 	/** Resolves before installing the custom editor so unavailable clipboard backends keep Pi paste intact. */
 	supportsAtomicEditor?: () => Promise<boolean>;
 	isImagePasteInput?: (data: string) => boolean;
@@ -205,7 +206,7 @@ export function registerImagePreviewExtension(
 	/** Set once a displaced factory throws, so shutdown never hands it back. */
 	let previousEditorFactoryFailed = false;
 	let tracked: Map<string, TrackedImage> = new Map();
-	let gallery: ImageGallery | null = null;
+	let presenter: GalleryPresenter | null = null;
 	let pollTimer: ReturnType<typeof setInterval> | null = null;
 	let unsubscribeTerminalInput: (() => void) | undefined;
 	const pasteScanTimers = new Set<ReturnType<typeof setTimeout>>();
@@ -265,53 +266,25 @@ export function registerImagePreviewExtension(
 	}
 
 	function refreshWidget(ctx: CtxLike): void {
-		if (tracked.size === 0) {
-			if (gallery) {
-				gallery.dispose();
-				gallery = null;
-			}
-			ctx.ui.setWidget(WIDGET_KEY, undefined);
-			return;
-		}
-
-		const galleryImages: GalleryImage[] = [...tracked.values()].map((t) => {
-			const preview = t.previewImage ?? t.image;
+		if (ctx.mode === "rpc" || ctx.mode === "print" || ctx.mode === "json") return;
+		const galleryImages: GalleryImage[] = [...tracked.values()].map((trackedImage) => {
+			const preview = trackedImage.previewImage ?? trackedImage.image;
 			return {
+				key: trackedImage.placeholder,
 				data: preview.data,
 				mimeType: preview.mimeType,
-				label: t.label,
+				label: trackedImage.label,
 			};
 		});
-
-		// Dispose the previous gallery to free kitty image resources before replacement
-		if (gallery) {
-			gallery.dispose();
-			gallery = null;
+		if (!presenter) {
+			presenter = new GalleryPresenter({ widget: ctx.ui, key: WIDGET_KEY });
 		}
-
-		ctx.ui.setWidget(
-			WIDGET_KEY,
-			(_tui: any, theme: any) => {
-				const galleryTheme = {
-					accent: (s: string) => theme.fg("accent", s),
-					muted: (s: string) => theme.fg("muted", s),
-					dim: (s: string) => theme.fg("dim", s),
-					bold: (s: string) => theme.bold(s),
-				};
-
-				gallery = new ImageGallery(galleryTheme);
-				gallery.setImages(galleryImages);
-				return gallery;
-			},
-			{ placement: "aboveEditor" },
-		);
+		presenter.update(galleryImages);
 	}
 
 	function resetDraft(ctx: CtxLike): void {
-		if (gallery) {
-			gallery.dispose();
-			gallery = null;
-		}
+		presenter?.dispose();
+		presenter = null;
 		tracked = new Map();
 		scanGeneration += 1;
 		lastScannedText = undefined;
@@ -455,10 +428,8 @@ export function registerImagePreviewExtension(
 		sessionGeneration += 1;
 		lastScannedText = undefined;
 		latestCtx = null;
-		if (gallery) {
-			gallery.dispose();
-			gallery = null;
-		}
+		presenter?.dispose();
+		presenter = null;
 	};
 
 	pi.on("session_start", async (_event: unknown, ctx: CtxLike) => {
@@ -496,10 +467,11 @@ export function registerImagePreviewExtension(
 						previousEditorFactoryFailed = true;
 						baseEditor = undefined;
 					}
-					return deps.createAtomicEditor!(tui, theme, keybindings, attachClipboardImage, baseEditor && typeof baseEditor === "object" ? baseEditor : undefined);
+					return deps.createAtomicEditor!(tui, theme, keybindings, attachClipboardImage, baseEditor && typeof baseEditor === "object" ? baseEditor as Record<string, unknown> : undefined);
 				};
 				for (const name of ["pi-zentui.editor-factory", "pi-zentui.editor-owner", "pi-zentui.editor-base-factory"] as const) {
 					const symbol = Symbol.for(name);
+					// SAFETY: editor factories may carry symbol metadata installed by another extension.
 					const value = previous ? (previous as unknown as Record<symbol, unknown>)[symbol] : undefined;
 					if (value !== undefined) Object.defineProperty(installedEditorFactory, symbol, { value });
 				}
@@ -520,6 +492,7 @@ export function registerImagePreviewExtension(
 	pi.on("session_shutdown", (_event: unknown, ctx: CtxLike) => {
 		cleanup();
 		const installed = installedEditorFactory;
+		// SAFETY: foreign editor factories use this symbol metadata as their documented ownership marker.
 		const previousIsZentui = Boolean(previousEditorFactory && (previousEditorFactory as unknown as Record<symbol, unknown>)[Symbol.for("pi-zentui.editor-factory")]);
 		// Zentui tears its own editor down, and a factory that already threw would
 		// throw again: `setEditorComponent` invokes the factory synchronously, so
