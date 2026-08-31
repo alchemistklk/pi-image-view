@@ -5,6 +5,33 @@ All notable changes to `pi-image-view` are documented here. This project follows
 
 ## Unreleased
 
+## 0.4.0 — 2026-08-31
+
+Incremental gallery rendering and bounded preview refreshes for smoother multi-image paste.
+
+### Added
+
+- A draft-scoped `GalleryPresenter` that mounts one widget, applies the first eligible image update synchronously, and coalesces nearby preview completions in a fixed, non-extending 50 ms window.
+- Deterministic 5/10/20-image resource measurements plus a repeatable real-terminal responsiveness, Ghostty, and tmux validation procedure.
+
+### Changed
+
+- Gallery resources are reconciled by stable attachment key. Unchanged PNGs retain their Kitty image IDs and are not retransmitted when another image finishes resizing.
+- Image transmission is separated from placement updates, so width and gallery-count geometry changes can reuse uploaded image data where the terminal protocol supports placement-only commands.
+- Removal, fallback, protocol transitions, renderer invalidation, reset, and shutdown now release or repopulate only the resources they own.
+
+### Fixed
+
+- Multiple staggered preview completions no longer dispose and recreate the entire gallery.
+- Stale widget factories, reentrant updates, and delayed timers cannot resurrect gallery state after clear, session replacement, or shutdown.
+- Alternate-screen teardown followed by component invalidation retransmits stable owned IDs instead of leaving placeholders that reference deleted terminal data.
+
+### Validation
+
+- 103 automated tests across 15 files.
+- On the deterministic 20-image fixture, gallery creations fell from 21 to 1 and PNG payload bytes from 39,440 to 3,760; no terminal image IDs remain after disposal.
+- Local Ghostty dogfood was reported as acceptable. Quantitative same-host responsiveness and tmux pane-switch measurements remain documented manual gates rather than claimed results.
+
 ## 0.3.1 — 2026-08-27
 
 Package discovery artwork and an evidence-backed 480px quality baseline. No runtime behavior changes.
