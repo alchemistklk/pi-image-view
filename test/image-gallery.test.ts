@@ -1,15 +1,20 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const capabilities = vi.hoisted(() => ({ images: "kitty" as "kitty" | null }));
+const capabilities = vi.hoisted(() => ({ images: "kitty" as "kitty" | null, hyperlinks: false }));
 
 vi.mock("@earendil-works/pi-tui", () => ({
-	getCapabilities: () => ({ images: capabilities.images }),
+	getCapabilities: () => ({ images: capabilities.images, hyperlinks: capabilities.hyperlinks }),
 	getImageDimensions: () => ({ widthPx: 100, heightPx: 100 }),
 	calculateImageRows: () => 4,
 	getCellDimensions: () => ({ width: 8, height: 16 }),
 }));
 
-import { ImageGallery } from "../src/image-gallery.ts";
+import {
+	ImageGallery,
+	detectImageProtocol,
+	supportsKittyUnicodePlaceholders,
+	supportsTerminalHyperlinks,
+} from "../src/image-gallery.ts";
 
 const plain = (text: string) => text;
 const theme = { accent: plain, muted: plain, dim: plain, bold: plain };
@@ -120,7 +125,39 @@ function measureIncremental(snapshots: readonly (readonly ReturnType<typeof png>
 }
 
 describe("image gallery format safety", () => {
-	afterEach(() => { capabilities.images = "kitty"; });
+	const savedEnv: Record<string, string | undefined> = {};
+	const envKeys = [
+		"TERM_PROGRAM",
+		"TERM",
+		"WEZTERM_PANE",
+		"WARP_SESSION_ID",
+		"WARP_TERMINAL_SESSION_UUID",
+		"KITTY_WINDOW_ID",
+		"GHOSTTY_RESOURCES_DIR",
+		"CMUX_SURFACE_ID",
+		"CMUX_WORKSPACE_ID",
+		"ORCA_IMAGE_PROTOCOL",
+		"PI_IMAGE_PROTOCOL",
+		"PI_HYPERLINKS",
+	] as const;
+
+	beforeEach(() => {
+		for (const key of envKeys) {
+			savedEnv[key] = process.env[key];
+			delete process.env[key];
+		}
+		capabilities.images = "kitty";
+		capabilities.hyperlinks = false;
+	});
+
+	afterEach(() => {
+		for (const key of envKeys) {
+			if (savedEnv[key] === undefined) delete process.env[key];
+			else process.env[key] = savedEnv[key];
+		}
+		capabilities.images = "kitty";
+		capabilities.hyperlinks = false;
+	});
 
 	it("uses valid PNG base64 payload fixtures", () => {
 		for (const fixture of PNG_FIXTURES) expect(Buffer.from(fixture, "base64").subarray(0, 8).toString("hex")).toBe("89504e470d0a1a0a");
@@ -278,5 +315,119 @@ describe("image gallery format safety", () => {
 			if (previousTmux === undefined) delete process.env.TMUX;
 			else process.env.TMUX = previousTmux;
 		}
+	});
+
+	it("renders direct Kitty image lines in WezTerm without U=1 placeholders or out-of-band stdout writes", () => {
+		process.env.TERM_PROGRAM = "WezTerm";
+		process.env.WEZTERM_PANE = "0";
+		expect(detectImageProtocol()).toBe("kitty");
+		expect(supportsKittyUnicodePlaceholders()).toBe(false);
+
+		const gallery = new ImageGallery(theme);
+		gallery.setImages([png("wez-a"), png("wez-b")]);
+		let lines: string[] = [];
+		const renderWrites = writesFor(() => {
+			lines = gallery.render(80);
+		});
+		expect(renderWrites).toEqual([]);
+		expect(lines.some((line) => line.includes(String.fromCodePoint(0x10eeee)))).toBe(false);
+		expect(lines[1]).toContain("\x1b[2G\x1b_Ga=T,f=100,q=2,C=1,c=25,r=4,");
+		expect(lines[1]).toContain("\x1b[29G\x1b_Ga=T,f=100,q=2,C=1,c=25,r=4,");
+		expect(lines.slice(2, 5)).toEqual(["", "", ""]);
+
+		const disposeWrites = writesFor(() => {
+			gallery.dispose();
+		});
+		expect(deletedIds(disposeWrites)).toHaveLength(2);
+	});
+
+	it("keeps the tmux WezTerm fallback when getCapabilities reports no image support", () => {
+		capabilities.images = null;
+		process.env.TERM_PROGRAM = "WezTerm";
+		withoutTmux(() => expect(detectImageProtocol()).toBeNull());
+
+		const previousTmux = process.env.TMUX;
+		process.env.TMUX = "test";
+		try {
+			expect(detectImageProtocol()).toBe("kitty");
+			expect(supportsKittyUnicodePlaceholders()).toBe(false);
+
+			const gallery = new ImageGallery(theme);
+			gallery.setImages([png("wez-tmux")]);
+			const lines = gallery.render(80);
+			expect(lines.some((line) => line.includes(String.fromCodePoint(0x10eeee)))).toBe(false);
+			expect(lines[1]).toContain("a=T,f=100");
+			expect(lines.some((line) => line.includes("wez-tmux.png"))).toBe(true);
+		} finally {
+			if (previousTmux === undefined) delete process.env.TMUX;
+			else process.env.TMUX = previousTmux;
+		}
+	});
+
+	it("wraps direct-placement Kitty sequences for tmux passthrough and keeps cursor positioning outside", () => {
+		process.env.TERM_PROGRAM = "WezTerm";
+		process.env.WEZTERM_PANE = "0";
+		const previousTmux = process.env.TMUX;
+		process.env.TMUX = "test";
+		try {
+			const gallery = new ImageGallery(theme);
+			gallery.setImages([png("wez-a"), png("wez-b")]);
+			const lines = gallery.render(80);
+			const imageLine = lines[1]!;
+			expect(imageLine).toContain("\x1b[2G\x1bPtmux;\x1b\x1b_Ga=T,f=100");
+			expect(imageLine).toContain("\x1b[29G\x1bPtmux;\x1b\x1b_Ga=T,f=100");
+			const unwrapped = imageLine.replace(/\x1bPtmux;\x1b\x1b_G[^\x1b]*\x1b\x1b\\\x1b\\/g, "");
+			expect(unwrapped).not.toContain("\x1b_G");
+			expect(unwrapped).toContain("\x1b[2G");
+		} finally {
+			if (previousTmux === undefined) delete process.env.TMUX;
+			else process.env.TMUX = previousTmux;
+		}
+	});
+
+	it("wraps every chunk of a large direct-placement payload for tmux passthrough", () => {
+		process.env.TERM_PROGRAM = "WezTerm";
+		const previousTmux = process.env.TMUX;
+		process.env.TMUX = "test";
+		try {
+			const gallery = new ImageGallery(theme);
+			gallery.setImages([png("wez-large", "x".repeat(4097))]);
+			const imageLine = gallery.render(80)[1]!;
+			const wrappers = [...imageLine.matchAll(/\x1bPtmux;\x1b\x1b_G([^;]*);/g)].map((match) => match[1]);
+			expect(wrappers).toHaveLength(2);
+			expect(wrappers[0]).toContain("m=1");
+			expect(wrappers[1]).toContain("m=0");
+		} finally {
+			if (previousTmux === undefined) delete process.env.TMUX;
+			else process.env.TMUX = previousTmux;
+		}
+	});
+
+	it("detects Orca and cmux for Kitty Unicode placeholders and OSC 8 hyperlinks even when WEZTERM_PANE leaks", () => {
+		capabilities.images = null;
+		capabilities.hyperlinks = false;
+		process.env.WEZTERM_PANE = "0";
+		process.env.TERM_PROGRAM = "Orca";
+		process.env.ORCA_IMAGE_PROTOCOL = "kitty";
+		expect(detectImageProtocol()).toBe("kitty");
+		expect(supportsKittyUnicodePlaceholders()).toBe(true);
+		expect(supportsTerminalHyperlinks()).toBe(true);
+
+		delete process.env.ORCA_IMAGE_PROTOCOL;
+		process.env.TERM_PROGRAM = "cmux";
+		process.env.CMUX_SURFACE_ID = "surface-1";
+		expect(detectImageProtocol()).toBe("kitty");
+		expect(supportsKittyUnicodePlaceholders()).toBe(true);
+		expect(supportsTerminalHyperlinks()).toBe(true);
+	});
+
+	it("respects Herdr and PI_IMAGE_PROTOCOL=none opt-outs even when getCapabilities reports kitty", () => {
+		capabilities.images = "kitty";
+		process.env.TERM_PROGRAM = "herdr";
+		expect(detectImageProtocol()).toBeNull();
+
+		process.env.TERM_PROGRAM = "kitty";
+		process.env.PI_IMAGE_PROTOCOL = "none";
+		expect(detectImageProtocol()).toBeNull();
 	});
 });

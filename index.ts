@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { convertToPng, resizeImage } from "@earendil-works/pi-coding-agent";
-import { getCapabilities, matchesKey } from "@earendil-works/pi-tui";
+import { matchesKey } from "@earendil-works/pi-tui";
 import {
 	putImageBlob,
 	resolveImageReference,
@@ -12,6 +12,7 @@ import {
 	type ImageResizer,
 } from "./src/image-content.ts";
 import { registerImagePreviewExtension } from "./src/extension-runtime.ts";
+import { supportsTerminalHyperlinks } from "./src/image-gallery.ts";
 import { resizeForDetail, resizeForPreview } from "./src/preview-resize.ts";
 import { createAtomicMarkerEditor } from "./src/atomic-editor.ts";
 import { canReadDirectClipboard, readDirectClipboard } from "./src/clipboard.ts";
@@ -44,7 +45,7 @@ async function persistImage(image: Parameters<typeof putImageBlob>[0]): Promise<
 
 function resolvePersistedImage(reference: string): string | undefined {
 	try {
-		if (!getCapabilities().hyperlinks) return undefined;
+		if (!supportsTerminalHyperlinks()) return undefined;
 	} catch {
 		// Capability probing can be unavailable during transcript reconstruction.
 		// Continue with the safe file target instead of leaking the internal scheme.
@@ -60,7 +61,7 @@ export function createImageView() {
 		maybeResizeImage: buildPreviewThumbnail,
 		resizeDetailImage: buildDetailImage,
 		normalizeImageForMatching,
-		isImagePasteInput: (data) => matchesKey(data, "ctrl+v") || matchesKey(data, "alt+v"),
+		isImagePasteInput: (data) => matchesKey(data, "ctrl+v") || matchesKey(data, "alt+v") || data.includes("\x1b[200~"),
 		createAtomicEditor: (tui, theme, keys, attachImage, baseEditor) => createAtomicMarkerEditor(tui as any, theme as any, keys as any, { readClipboard: readDirectClipboard, attachImage }, baseEditor),
 		supportsAtomicEditor: canReadDirectClipboard,
 		storeImage: persistImage,
