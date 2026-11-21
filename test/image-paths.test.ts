@@ -22,6 +22,18 @@ describe("image path detection", () => {
 		]);
 	});
 
+	it("keeps the narrow no-break space macOS puts before AM/PM in screenshot names", () => {
+		// Terminals escape ASCII spaces on drop but leave U+202F as-is.
+		expect(
+			extractImagePaths("/Users/jv/Desktop/Screenshot\\ 2026-11-21\\ at\\ 10.30.45\u202FAM.png"),
+		).toEqual([
+			{
+				raw: "/Users/jv/Desktop/Screenshot\\ 2026-11-21\\ at\\ 10.30.45\u202FAM.png",
+				path: "/Users/jv/Desktop/Screenshot 2026-11-21 at 10.30.45\u202FAM.png",
+			},
+		]);
+	});
+
 	it("detects a double-quoted path that contains spaces", () => {
 		expect(extractImagePaths('"/Users/jv/Desktop/My Photo.png"')).toEqual([
 			{
