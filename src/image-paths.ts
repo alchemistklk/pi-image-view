@@ -10,7 +10,7 @@ export interface DetectedImagePath {
 
 const IMAGE_EXT = "(?:png|jpe?g|gif|webp)";
 const PATH_END = `(?=[\\s,.;:!?)\\]]|$)`;
-const BARE_PATH = `(?:~/|\\.\\.?/|/)(?:\\\\.|[^\\s:*?"<>|])*\\.${IMAGE_EXT}${PATH_END}`;
+const BARE_PATH = `(?:~/|\\.\\.?/|/)(?:\\\\.|[^ \\t\\r\\n:*?"<>|])*\\.${IMAGE_EXT}${PATH_END}`;
 const WINDOWS_DRIVE_PATH = `[A-Za-z]:[\\\\/][^\\s*?"<>|]*\\.${IMAGE_EXT}${PATH_END}`;
 const WINDOWS_UNC_PATH = `\\\\\\\\[^\\\\/\\s:*?"<>|]+[\\\\/][^\\s*?"<>|]*\\.${IMAGE_EXT}${PATH_END}`;
 const DOUBLE_QUOTED_PATH = `"(?:\\\\.|[^"\\\\])*\\.${IMAGE_EXT}"`;
